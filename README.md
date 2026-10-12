@@ -20,7 +20,8 @@ Source of the lessons: each repo's `docs/status.md` (hardware findings), Joust's
 this guide states a hardware fact it is one that was confirmed on a K2, unless it says otherwise. The games
 are cited throughout as the evidence, not as the subject.
 
-*This file is kept identical in the Joust and Tempest repos until it has a home of its own; edit both.*
+*This repo is the guide's only copy (since 2026-10-03); `docs/port-guide.md` in Joust and Tempest just
+points here.*
 
 ---
 
@@ -92,13 +93,38 @@ Conventions worth repeating:
 
 ## 3. Level 2 is the environment, and its limit is logical space
 
-**The machine, as of 2026-09-30** (re-check on every new core; section 13, "Which source to believe"):
+**The machine, as of 2026-10-11** (re-check on every new core; section 13, "Which source to believe"):
 
 | | Now | Before |
 |---|---|---|
-| CPU | 6809 at **12 MHz**, K2 and Jr2 (the K2 since 2026-09-27) | 8 MHz. Every µs figure in this guide was measured at 8 MHz unless it says otherwise; CPU-bound costs scale by 2/3, driver-call costs roughly so, and anything tied to the frame (the 60 Hz tick, a DMA fill's vblank wait) not at all |
-| RAM | **1,792K** (224 blocks of 8K): `$00-$3F`, `$40-$9F`, `$A0-$BF`, `$D0-$EF` | 1 MB (128 blocks): `$40-$9F` was the flash window and expansion space |
-| How | The kernel (`krnp2`, 2026-09-27) sets `FLASHDIS` when `MMU_IO_CTRL` bit 7 says the core has it, and maps `$40-$9F` as RAM; the block map covers all 256 blocks on both machines. **Confirmed working on hardware** (2026-09-30) | An older core, or an older kernel, still gives 1 MB — so treat an `F$AllRAM` failure as a real outcome, and don't design an asset set that needs the 1,792K without saying so |
+| CPU | 6809 at **about 20 MHz** on Longview, K2 and Jr2. The turbo is adaptive (per the core documentation: RAM reads 20 MHz, RAM writes about 14 MHz, the fixed I/O at `$FE00-$FFEF` 6.29 MHz), so the speed-up depends on the instruction mix; measure, don't scale | 12 MHz on the late `v8` cores (the K2 from 2026-09-27); 8 MHz before. Every µs figure in this guide was measured at 8 MHz unless it says otherwise; CPU-bound costs scale down, driver-call costs roughly so, and anything tied to the frame (the 60 Hz tick, a DMA fill's vblank wait) not at all |
+| Core | **Longview** (K2 rc22/rc23, Jr2 rc24): the new memory map below | `v8_rc16`-`v8_rc20`: the old map, device pages at `$C0-$C4` |
+| RAM | **2,016K** (252 blocks of 8K): `$00-$FB`, one contiguous pool; `$FC-$FF` are the device pages. 1,248K (`$00-$3F`, `$A0-$FB`) if `FLASHDIS` is off | Old map: 1,792K (224 blocks: `$00-$BF`, `$D0-$EF`) with `FLASHDIS`, 1 MB without |
+| How | Upstream NitrOS-9 main's kernel (`krnp2`) sets `FLASHDIS` when `MMU_IO_CTRL` bit 7 says the core has it, maps `$40-$9F` as RAM, and marks only `$FC-$FF` NotRAM. Tempest and Joust run on it on both machines (K2 rc22, Jr2 rc24, 2026-10-10). The 2,016K figure is the kernel's and the core documentation's; **nobody here has measured free RAM on it** | A kernel and a core must agree on the map (below). An older core or kernel gives less RAM, so treat an `F$AllRAM` failure as a real outcome, and don't design an asset set that needs more than 1 MB without saying so |
+
+**The memory map moved (Longview, 2026-10).** The device pages went from `$C0-$C4` to the top of the block
+space, and the blocks they left became RAM:
+
+| What | Old block | Longview block | Symbol (`defs/wildbits.d`) |
+|---|---|---|---|
+| VICKY registers: bitmaps, tile maps, sprites, line engine, text CLUTs, gamma | `$C0` | `$FC` | `VICKY_BLK` (also `BITMAP_BLK`, `SPRITE_BLK`, `TEXT_LUT_BLK`, `GAMMA_BLK`) |
+| Fonts, graphics CLUTs | `$C1` | `$FD` | `FONT_BLK` |
+| Text characters | `$C2` | `$FE` | `TEXT_RAM_BLK` |
+| Text colours | `$C3` | `$FF` | `COLOR_RAM_BLK` |
+| Sound chips | `$C4` | none; `$C4` is RAM | the fixed ports `$FF91-$FF99` (section 8) |
+
+The fixed-decode I/O at `$FE00-$FFFF` (the DMA, the coprocessor, the VS1053, the MMU, SOLdrv) did not move.
+What follows from it:
+
+- **A program that reaches the hardware only through grfdrv256 does not notice.** Tempest and Joust built
+  against the new-map tree are byte-identical to their old-map builds, and run.
+- **A program or driver that maps a device page itself must use the symbols, never the numbers.** On a
+  Longview core `$C0` is ordinary RAM: a write there corrupts whatever owns that block, and nothing appears
+  on the screen. Offsets inside a page (`$1000` bitmaps, `$1300` sprites, ...) are unchanged.
+- **The kernel, the drivers and the core must be on the same map.** Upstream NitrOS-9 main is new-map only
+  (since `fb10ce44`; the Wildbits terminal drivers joined it in PR #450, `b51f6f67`, 2026-10-10), so its
+  images need a Longview core, and an old-map tree needs an old core. Rebuild the disk images when the core
+  crosses that line.
 
 What the extra speed and memory do **not** change: the eight-block logical space (below) is the same, so
 the module budget, the window rule and `E$MemFul` are exactly as they were; more RAM means more assets
@@ -122,7 +148,7 @@ itself — Tempest gained nothing from 8 → 12 MHz until a frame gate that quan
   used two 2-block windows during start-up; that fits a 3-block module and not a 4-block one, so the
   failure appeared only when the module grew past 24,576 bytes — far below its real limit and nowhere
   near the code that caused it.
-- **Assets live outside the 64K.** `F$AllRAM` blocks anywhere in the 1,792K (1 MB on an older core); map one in with `F$MapBlk`,
+- **Assets live outside the 64K.** `F$AllRAM` blocks anywhere in RAM (2,016K on a Longview core, less on older ones; section 3); map one in with `F$MapBlk`,
   read the file into it, `F$ClrBlk`. (**Known wart:** `F$AllRAM`/`F$DelRAM` from an application is
   technically a system call. The answer now exists in grfdrv256 — **`SS.GfxAlloc` `$D4` / `SS.GfxFree`
   `$D5`**, N consecutive blocks the program owns, confirmed on the K2 2026-09-20 — but neither Joust nor
@@ -215,25 +241,27 @@ Joust's arrangement, which reproduced arcade behaviour including its clipping:
 | bitmap 1 (layer 1) | text, scores, effects, one-colour silhouettes |
 | tile map 0 (layer 2) | the static background |
 
-Hardware facts (confirmed on rc16 unless marked):
+Hardware facts (confirmed on rc16 unless marked). Addresses are written page`:`offset with the
+`defs/wildbits.d` symbol for the page, because the page number depends on the core (section 3): `VICKY_BLK`
+is `$FC` on a Longview core and was `$C0`; `FONT_BLK` is `$FD` and was `$C1`. The offsets did not change.
 
-- **Sprites:** 128 records of 8 bytes at `$C0:$1300 + 8n` — CTRL (bit 0 enable, 2:1 CLUT, 4:3 layer,
+- **Sprites:** 128 records of 8 bytes at `VICKY_BLK:$1300 + 8n` — CTRL (bit 0 enable, 2:1 CLUT, 4:3 layer,
   6:5 size 00=32 01=24 10=16 11=8), 24-bit address, X and Y as 16-bit. **The visible screen starts at
   (32,32)**, and **sprite 0 draws on top**.
-- **Tile sets:** 4 bytes at `$C0:$1180 + 4n` — CFG, then address hi/mid/lo. *The manual's address-first
+- **Tile sets:** 4 bytes at `VICKY_BLK:$1180 + 4n` — CFG, then address hi/mid/lo. *The manual's address-first
   table is wrong for these registers.* **CFG's SQUARE flag is bit 3, not bit 7** — the core takes CFG from
   the low nibble of that byte and reads bit 3; bits 7:4 are wired to nothing. Every program in this project
   writes `$80` and gets a linear sheet because bit 3 is clear, which is what they wanted. *Square sheets are
   unproven on hardware.* Linear pixels are one tile after another: tile n at n×64 (8×8) or n×256 (16×16).
-- **Tile maps:** 12 bytes at `$C0:$1100 + 12n` — CTRL (bit 0 enable, bit 4 TILE_SIZE 1 = 8×8), address
+- **Tile maps:** 12 bytes at `VICKY_BLK:$1100 + 12n` — CTRL (bit 0 enable, bit 4 TILE_SIZE 1 = 8×8), address
   hi/mid/lo, SIZE_X, SIZE_Y, X, Y (16-bit, high byte first). **SIZE_X/Y are 10-bit — up to 1024 tiles.**
   Map entries are tile number, then an attribute byte: **tile set in bits 2:0, CLUT in bits 5:3**, collision
   enable in bit 6. **Three tile maps, not four** — the core has a fourth set of registers but no way to
   display it. To turn a map off, clear CTRL bit 0 and re-send; don't zero the record, or you throw away the
   address and size too.
-- **Bitmaps:** control at `$C0:$1000` (+8 per bitmap), 24-bit start address at +1..+3; 320×240 8bpp,
+- **Bitmaps:** control at `VICKY_BLK:$1000` (+8 per bitmap), 24-bit start address at +1..+3; 320×240 8bpp,
   one byte per pixel, `start + y*320 + x`.
-- **CLUTs** at `$C1:$1000 + $400·n`, entries **B, G, R, A**. Index 0 is transparent in sprites and
+- **CLUTs** at `FONT_BLK:$1000 + $400·n`, entries **B, G, R, A**. Index 0 is transparent in sprites and
   bitmaps, so "erase" means writing 0 — and an opaque black needs a second entry set equal to entry 0.
 - **The tile layer draws 8 px left of the bitmap layers at zero scroll** on rc16. Real, measured; Joust
   compensates in the converter (`--tile-dx`). Check it again on new hardware rather than assuming.
@@ -414,7 +442,8 @@ What the cores have changed since the reading below — **re-read the RTL for th
 
 - **Early cores dropped pixels** (gaps that moved each run; DMA and CPU writes clean). Fixed by the FPGA
   developer; a clear-then-fan harness (Tempest's `bmtest` `C`+`L`) is the check to repeat on every new core.
-- **The FIFO is 8,192 pixels, and its full flag is now connected**: the walk stalls instead of losing
+- **The FIFO is 8,192 pixels on both the K2 and the Jr2** (the FPGA developer; a document that says 4,096
+  is wrong), **and its full flag is now connected**: the walk stalls instead of losing
   pixels. The driver's `LD.Depth` must match the core, or it uses half the FIFO.
 - **HIRES4: 640×240 at 4 bits a pixel**, per bitmap (control byte bit 4; bits 7:5 a palette GROUP, so a
   pixel's CLUT entry is GROUP×16 + nibble, nibble 0 transparent), set with `SS.BmCfg`. Same 76,800 bytes
@@ -434,7 +463,7 @@ What the cores have changed since the reading below — **re-read the RTL for th
 cores then in use — K2 `Core2X_B0C` and Jr2 `Core2X`, before the changes in 7.0. The RTL is authoritative
 about what the hardware does; a harness is still what tells you how fast it does it.
 
-#### Registers, `$C0:$1080-$1087`
+#### Registers, `VICKY_BLK:$1080-$1087`
 
 **Writing** (`TinyVicky_BM_Registers.v:100`, register index = address bits 2:0; field slicing from the
 64-bit block at `:35` and `TinyVickyCoreModule.v:447-458`):
@@ -499,7 +528,7 @@ are a **pixel counter, not the X0 you wrote**.
    assumed.
 4. Check an out-of-range endpoint really does nothing, and that the GO-low step is required.
 5. Only then decide whether the engine belongs behind a new `SS.*` call or is driven from the application.
-   It is in the mapped device page `$C0`, reached through `F$MapBlk` like every other VICKY register —
+   It is in the mapped device page `VICKY_BLK`, reached through `F$MapBlk` like every other VICKY register —
    **no absolute-address exception is needed**, and none should be asked for.
 
 ## 7a. The other coprocessors
@@ -557,20 +586,22 @@ section 8.4; the rest are unexercised):
 - **SAM2695 (Dream)** — a General MIDI synthesiser: notes and instruments over a MIDI stream rather than
   samples, so it costs almost no CPU per frame and no sample assets at all. The natural fit for music, and
   for sound effects that can be expressed as notes.
-- **OPL3 (YMF262)** at `$C4:$0180-$0183` — FM synthesis, **write-only, no status or IRQ**, so the driver
+- **OPL3 (YMF262)** — FM synthesis, **write-only, no status or IRQ**, so the driver
   must keep its own shadow of every register and respect the chip's write timing itself.
-- **SID ×2** at `$C4:$0000` (left) and `$0100` (right); `$0080` ("mono") is not a third chip but writes
+- **SID ×2**, left and right, plus a "both" selection that is not a third chip but writes
   both at once (`SID_OPL3_Interface.v`: two `sid6581` instances, `wren` = left|mono and right|mono), so six
   voices in all — soft SIDs in the FPGA. Best where a
   sound is a waveform-and-envelope description rather than a recording.
-- **PSG ×3** at `$C4:$0200-$0217` — square waves and noise, the cheapest of the lot, and a close match for
+- **PSG ×3** (left, both, right) — square waves and noise, the cheapest of the lot, and a close match for
   arcade hardware of that generation.
 
-On the older cores all four live in the mapped device page `$C4`, reached with `F$MapBlk` like the VICKY
-registers. **Newer cores add a fixed-decode sound block at `$FF90`** — `$FF91-$FF93` the PSGs (left, both,
-right), `$FF94-$FF97` the OPL3's two address/data pairs, `$FF98` a SID selector and `$FF99` SID data
-(section 8.4) — which is an absolute-address exception like the VS1053, but a far cheaper one to use than
-a mapped page (8.4 says why). Which of the two your core has is an RTL question.
+**On a Longview core the only way in is the fixed-decode sound block** — `$FF91-$FF93` the PSGs (left,
+both, right), `$FF94-$FF97` the OPL3's two address/data pairs, `$FF98` a SID selector and `$FF99` SID
+data (section 8.4; `PSG_LEFT_PORT` ... `SID_DATA_PORT` in `defs/wildbits.d`). That is an absolute-address
+exception like the VS1053, and a far cheaper one to use than a mapped page (8.4 says why). Block `$C4` is
+RAM there. *Before Longview* the chips were also in the mapped device page `$C4` (OPL3 at `$0180-$0183`,
+SIDs at `$0000`/`$0100` with "mono" at `$0080`, PSGs at `$0200-$0217`), and the late `v8` cores had both
+paths; code written for that page does nothing useful on a Longview core and overwrites someone's RAM.
 
 **Why this matters beyond taste:** someone has worked out how to use the VS1053 as a **3D graphics
 processor** (how is not known here). If a port ever wants that, the VS1053 stops being available for
@@ -686,7 +717,8 @@ sequencer stays byte-exact against the ROM, and only the translation is new.
   showed the whole problem at once: only `AUDF`/`AUDC` change in play, never more than five channels sound
   together (six never), and only a few `AUDC` forms occur. That is what says six voices suffice and which
   approximations matter.
-- **Two SIDs, six voices** — not three chips: `$C4:$0080` "mono" writes both. The SID clock is 14.318 MHz /
+- **Two SIDs, six voices** — not three chips: the selector's "both" (`$C4:$0080` "mono" before Longview)
+  writes both. The SID clock is 14.318 MHz /
   15 = 954,545 Hz; the sound chips are mixed in the FPGA and sent to the codec over I2S, so there is **no
   codec input to select** for them (unlike the VS1053, section 8.3).
 - **The mapping Tempest uses:** a POKEY pure tone → a 50% pulse at the same pitch; every polynomial form →
@@ -694,9 +726,9 @@ sequencer stays byte-exact against the ROM, and only the translation is new.
   with attack, decay and release 0. A SID envelope does not climb to a raised sustain, so a louder volume
   or a new waveform re-gates the voice. Hand voices out as channels start sounding.
 - **The access path is a measured cost, not a detail.** Reaching `$C4` with `F$MapBlk` through the service
-  window, shared with the text drawing, lost **2.7% of the K2's ticks** where the host model predicted
+  window (on a pre-Longview core), shared with the text drawing, lost **2.7% of the K2's ticks** where the host model predicted
   nothing; the same code writing the MMU slot directly (interrupts masked, an exception at `$FFA0-$FFAF`)
-  lost none measurable. The `$FF98`/`$FF99` block then made both unnecessary: the selector's bits 6-5 pick
+  lost none measurable. The `$FF98`/`$FF99` block then made both unnecessary (and on Longview it is the only path): the selector's bits 6-5 pick
   left `00`, right `01`, both `10` or off `11`, bits 4-0 the register, and it holds between data writes.
   **An `F$MapBlk` a pass is expensive on hardware** — more than any model here charged.
 - **Test it without ears on the host** (Tempest's `tools/sndtest.py`: after every pass, each sounding
@@ -797,6 +829,13 @@ program people can use.
 - `export NITROS9DIR=...` on **every** command — shell state does not persist between tool calls.
   Build in `recipes/wildbits/l2` with `PLATFORM=k2` or `PLATFORM=jr2` (which also selects the keyboard
   driver). `.mods` is **shared between platforms**: building for one replaces the other's modules.
+- **Which tree.** Upstream NitrOS-9 main (`nitros9project/nitros9`) carries the Wildbits Level 2 terminal
+  drivers (vtio, grfdrv256, term, `vtm`, assetload) since PR #450 (2026-10-10), on the Longview map. The
+  older `wb/multiterm` branch is the old map and builds only for old-map cores (section 3).
+- **Device pages by symbol, never by number** (`VICKY_BLK`, `FONT_BLK`, `TEXT_RAM_BLK`, `COLOR_RAM_BLK`;
+  the sound ports by their `*_PORT` names). The move to Longview found 13 hardcoded `#$C0-#$C4` in
+  grfdrv256 and 14 in vtio; the fix was a symbols-only commit, checked byte-identical on the old map, before
+  the values changed. Do it in that order: the identical build is the proof that no number was missed.
 - **No generic rule makes a module depend on a defs file.** The recipe makefile carries an explicit list;
   a module missing from it silently keeps its old `.mods` file after a defs edit. When in doubt
   `rm -f .mods/<module>`.
@@ -862,7 +901,7 @@ A full pool handing back a scratch record is a real edge case — decide what it
 ### 12.1 How much of the display to send each frame
 
 A driver call costs about **400 µs before it moves a byte**, and about **8.4 µs a sprite record** after that
-(measured at 8 MHz, `docs/driver-performance.md` in the Joust repo; re-measure at 12 MHz).  Put those two numbers together and one call is worth about **48
+(measured at 8 MHz, `docs/driver-performance.md` in the Joust repo; re-measure at the current speed).  Put those two numbers together and one call is worth about **48
 records**: it is cheaper to send 48 records you did not need to than to make a second call that skips them.
 That ratio, not the byte count, is what a commit should be designed around, and it is worth re-measuring on
 any machine before trusting it.
@@ -957,7 +996,11 @@ what they bought Tempest:
 **Testing**
 
 - **The hardware is the test.** The Wildbits MAME (`wbjr2`) emulates less than the machine, and what it
-  covers changes with its build. The build of **2026-09-30 (commit `8779b61`, the v8_rc20 baseline)**
+  covers changes with its build. **Since `b039bf09968` (2026-10-11) it models `Longview_rc24`, the new memory
+  map (section 3), and the Jr2 only**: a Level 2 image built from upstream main (plus the pending bootfile-limit
+  change) boots to the shell in it; no game has
+  been run in it yet, so what follows about rendering is from the old-map build and is unchecked on this
+  one. An old-map image needs the old build. The build of **2026-09-30 (commit `8779b61`, the v8_rc20 baseline)**
   renders the **bitmap, tile map and sprite layers** with their CLUTs (tile-map attributes as section 6
   has them, from `028632e`), the MemText text engine, **draws with the line engine**
   (Tempest's rating-screen wells appear), returns the live raster row at `$FFDA/$FFDB`, and has the
@@ -1140,8 +1183,8 @@ Addresses and register behaviour have several sources here and they do not agree
    (`wildbitscomputing/fpga-6809-cores-staging`). It is the hardware, so it settles anything the documents
    disagree about — register decode, field widths, what a read-back really returns. **Reference only:
    never modify, never commit, never push anything inside it**; it is in `.gitignore` for that reason.
-2. **The rc16 memory map and the Wildbits site** — this machine, and the documentation for anything the
-   FPGA adds (the line-draw engine, the extended addressing, the bridge registers).
+2. **The core's memory-map page (now `Longview_rcNN`; rc16 was the first one used here) and the Wildbits
+   site** — this machine, and the documentation for anything the FPGA adds (the line-draw engine, the extended addressing, the bridge registers).
 3. **The NitrOS-9 tree** — `defs/wildbits.d`, the drivers, the kernel. Authoritative for what the software
    currently does and assumes, which is not always the same as what the hardware allows.
 4. **The F256 manual** — structure and concepts only: what a stride is, what a tile set is, how a DMA fill
@@ -1357,6 +1400,7 @@ display, the sound and the timing, as well as the logic.
 - [ ] `make` clean, `budget` passes, `pic` at 0 reports, `.map` checked for any new symbol
 - [ ] Sources scanned case-folded for duplicate labels
 - [ ] Installed module byte-identical to the built one, and its size recorded
+- [ ] Kernel, drivers, core and MAME all on the same memory map (section 3)
 - [ ] Run in the Wildbits MAME: start, coin, start, quit, the sign-off (and know which core that MAME models)
 - [ ] Every register each driver call returns saved where needed, and modelled on the host
 - [ ] The diagnostic build and a fixed benchmark if the run is meant to measure anything
