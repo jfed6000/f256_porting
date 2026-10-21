@@ -4,9 +4,13 @@
 #   make install DSK=/abs/x.dsk  CMDS/starter, and the art in /STARTER, on a disk image (ToolShed's os9)
 #   make mame                    install onto a copy of the image and run it in the Wildbits MAME, with snapshots
 #
-# Set these for your machine (or on the command line): where the NitrOS-9 tree is (for its defs), the assembler.
+# Your machine's paths come from the environment: copy ../env.sh.example to ../env.sh, fill it in, and
+# `. ../env.sh` (the guide's "Your machine"). Here: NITROS9DIR (for its defs) and LWASM; make mame wants MAMEDIR,
+# F256_ROMS and F256_IMAGE too.
 
-NITROS9DIR ?= $(HOME)/projects/wild/main/nitros9
+ifndef NITROS9DIR
+$(error NITROS9DIR isn't set: copy ../env.sh.example to ../env.sh, fill it in, and run . ../env.sh)
+endif
 LWASM      ?= lwasm
 AS          = $(LWASM) --no-warn=ifp1 --6809 --format=os9 \
               --pragma=nosymbolcase,condundefzero,dollarnotlocal \

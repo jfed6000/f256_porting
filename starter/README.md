@@ -11,12 +11,15 @@ make install DSK=/abs/x.dsk   # CMDS/starter and /STARTER/*.bin on a disk image 
 make mame                     # install onto a copy of the image and run it in the Wildbits MAME, with snapshots
 ```
 
-On the machine: `chd /dd/STARTER`, then `starter`. Arrows move the ball, Z or space plays a note, Q quits.
+On the machine: `chd /dd/STARTER`, then `starter`. Arrows move the ball, Z plays a note (space too, on a Jr2 only: the K2's
+driver never sets the space bit, guide section 9), Q quits.
 
-Set `NITROS9DIR` (the NitrOS-9 tree, for its defs) and `LWASM` for your machine, and `MAMEDIR`, `ROMS` and `IMAGE`
-for `make mame`. Checked 2026-10-20 in the Wildbits MAME (Longview, Jr2 image): it starts, draws, scrolls, takes Q
+First tell it where things are on your machine: copy `../env.sh.example` to `../env.sh`, fill it in, and
+`. ../env.sh` (the guide's "Your machine": `NITROS9DIR`, `LWASM`, and for `make mame` `MAMEDIR`, `F256_ROMS`,
+`F256_IMAGE`). Checked 2026-10-20 in the Wildbits MAME (Longview, Jr2 image): it starts, draws, scrolls, takes Q
 and exits to the shell. Held arrow keys can't be scripted in MAME, and MAME doesn't voice the SAM2695 (guide 8.5):
-the ball's movement and the note are for the machine.
+the ball's movement and the note are for the machine. **On a K2 (2026-10-21)**: the arrows, Z's note, the pause
+and Q all work; space doesn't play the note (as section 9 predicts).
 
 ## What's here
 

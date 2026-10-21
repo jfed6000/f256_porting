@@ -10,6 +10,8 @@
   machine). Then `docs/port-plan.md` (the design) and `docs/port-<game>.md` (the survey).
 - **The platform:** the F256 porting guide, https://github.com/jfed6000/f256_porting (`README.md`; a local clone at
   `<path>`). Check every hardware assumption against it; its section 13 is the working method.
+- **This machine's paths:** `<path>/env.sh` (from the guide's `env.sh.example`): source it before building or
+  running MAME.
 - **The machines:** <K2 / Jr2>, core <Longview_rcNN>. I run the builds on the hardware; Claude can't. MAME
   (`<path to mame>`, machine `wbjr2`) is for "does it start, draw and exit"; its timing is no evidence, it starts RAM
   at zero, and it doesn't voice the SAM2695.

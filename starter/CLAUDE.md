@@ -4,8 +4,8 @@ The smallest complete F256 game skeleton (NitrOS-9 Level 2, 6809), kept as a tem
 
 - **The platform:** the F256 porting guide, `../README.md` (https://github.com/jfed6000/f256_porting). Check every
   hardware assumption against it; section 13 is the working method, section 15 how we work together.
-- **Build and test:** `make`, `make install DSK=<absolute path>`, `make mame` (set `NITROS9DIR`, `LWASM`, `MAMEDIR`,
-  `ROMS`, `IMAGE` for the machine). MAME proves it starts, draws and exits; held keys and the SAM2695 are for the
+- **Build and test:** `. ../env.sh` first (the machine's paths), then `make`, `make install DSK=<absolute path>`,
+  `make mame`. MAME proves it starts, draws and exits; held keys and the SAM2695 are for the
   hardware, which the user runs.
 - **Keep it small and correct.** It's a teaching skeleton: every addition must be something every game needs, cite
   the guide's section, and leave `make mame` passing. Game-specific code belongs in a copy, not here.

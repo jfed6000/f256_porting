@@ -33,6 +33,20 @@ are cited throughout as the evidence, not as the subject.
 *This repo is the guide's only copy (since 2026-10-03); `docs/port-guide.md` in Joust and Tempest just
 points here.*
 
+**Your machine.** Paths in this guide are written as these shell variables. Set them once: copy
+[`env.sh.example`](env.sh.example) to `env.sh`, fill in your directories, and `. ./env.sh` in each shell (or from
+your profile). Then the commands below run as written, and the starter's makefile and scripts read the same names.
+
+| Variable | What it points at |
+|---|---|
+| `$NITROS9DIR` | the NitrOS-9 source tree (`nitros9project/nitros9`, main): its `defs`, drivers and recipes (`$NITROS9DIR/recipes/wildbits/l2`) |
+| `$LWASM` | the assembler (LWTOOLS' `lwasm`) |
+| `$MAMEDIR` | your build of the Wildbits MAME (`github.com/rlucente-retro/mame`); the binary is `$MAMEDIR/mame` |
+| `$F256_ROMS` | the ROM files that MAME's `wbjr2` machine needs (its `-rompath`) |
+| `$F256_IMAGE` | a bootable NitrOS-9 Level 2 disk image for the Jr2 (MAME runs the Jr2's), new map on a Longview MAME |
+| `$ARCADE_MAME` | a stock MAME, for running and capturing an arcade original (section 14a) |
+| `$FPGADIR` | a read-only clone of the FPGA core, `wildbitscomputing/fpga-6809-cores-staging` (the RTL: section 13) |
+
 ---
 
 ## 1. The shape of the job
@@ -72,7 +86,7 @@ src/             one OS-9 program module: <game>.asm includes data.a, platform.a
                  source file per arcade area, converted in place with arcade labels intact
 tools/           host converter (assets -> .bin + generated .a tables), static checkers
 assets/          converter output; loaded at run time from the SD card
-nitros9_complete/nitros9   vendored NitrOS-9 tree; driver work lives here
+nitros9_complete/nitros9   (Joust) a vendored NitrOS-9 tree for its driver work; otherwise $NITROS9DIR
 ```
 
 Conventions worth repeating:
@@ -570,7 +584,7 @@ What the cores have changed since the reading below — **re-read the RTL for th
 
 ### 7.1 The RTL reading (2026-09-18)
 
-**Everything below is read from the FPGA source** (`fpga-6809-cores-staging/`, read-only: `source/LineDraw.v`,
+**Everything below is read from the FPGA source** (`$FPGADIR`, read-only: `source/LineDraw.v`,
 `source/TinyVicky_BM_Registers.v`, `source/TinyVickyCoreModule.v:444-473`, and the FIFO's `.xci`), for the
 cores then in use — K2 `Core2X_B0C` and Jr2 `Core2X`, before the changes in 7.0. The RTL is authoritative
 about what the hardware does; a harness is still what tells you how fast it does it.
@@ -1038,7 +1052,8 @@ the General MIDI synth: the 6809 sends notes, a few bytes a frame, and the chip 
   calls and the time went back to the drawing.
 - **Modifier/arrow keys and ordinary keys held:** `SS.LiveKeys $C6` returns the driver's live `D.KySns`
   bits in R$A — Shift, Ctrl, Alt, four arrows, space (bit 7 set on the Jr2 and never on the K2: a latent
-  driver inconsistency, do not design against it) — and up to six ordinary key codes held down in
+  driver inconsistency, do not design against it — confirmed again with `starter/` on a K2, 2026-10-21: Z played its
+  note, space didn't; give every action a letter key) — and up to six ordinary key codes held down in
   R$X/R$Y/R$U, no caller buffer. (The key codes were once a separate call, `SS.KyDwn $D0`; that code is now
   free.) This exists because NitrOS-9 has nothing else that reports a non-modifier key as *held*: the press
   makes a character and the release is computed and thrown away.
@@ -1110,7 +1125,8 @@ program people can use.
 
 ## 11. Driver work in the NitrOS-9 tree
 
-- `export NITROS9DIR=...` on **every** command — shell state does not persist between tool calls.
+- `export NITROS9DIR=...` on **every** command (or `. ./env.sh`) — shell state does not persist between an
+  assistant's tool calls.
   Build in `recipes/wildbits/l2` with `PLATFORM=k2` or `PLATFORM=jr2` (which also selects the keyboard
   driver). `.mods` is **shared between platforms**: building for one replaces the other's modules.
 - **Which tree.** Upstream NitrOS-9 main (`nitros9project/nitros9`) carries the Wildbits Level 2 terminal
@@ -1303,7 +1319,7 @@ what they bought Tempest:
   colours against a photograph**: `34a1205` read CLUT entries as R, G, B, A and swapped red and blue
   everywhere; `0f1d5dd` put it back to the hardware's **B, G, R, A** (the RTL's 8-bit-write, 32-bit-read
   CLUT RAM puts byte 0 in bits 7:0, which `TinyVickyCoreModule.v` wires to blue). Older builds:
-  `6ed0ed0` (2026-09-21) had no line engine and no sound; the Sep 6 one, and `~/projects/grok/mame`,
+  `6ed0ed0` (2026-09-21) had no line engine and no sound; the Sep 6 one, and an earlier separate build,
   draw text only. It is good for proving a *program* works — crashes, hangs,
   OS-9 error codes, what is on screen — for a static utility harness that prints numbers, and for
   **counting calls** (call counts are logic, not timing). **Its timing is no evidence.** **Do not modify
@@ -1323,12 +1339,12 @@ what they bought Tempest:
 
 **Running the Wildbits MAME** (checked 2026-09-30 with Tempest on the Jr2 image):
 
-- **The binary** is **`~/projects/wild/mame/mame`**, machine **`wbjr2`** (the only Wildbits machine it has;
+- **The binary** is **`$MAMEDIR/mame`**, machine **`wbjr2`** (the only Wildbits machine it has;
   it runs the **Jr2** image, not the K2's). The directory is its own git clone
-  (`github.com/rlucente-retro/mame`), shared by every project; it moved out of the NitrOS-9 tree on
-  2026-09-30, and `$NITROS9DIR/mame` is a symlink to it for old command lines. Pull and build it there:
+  (`github.com/rlucente-retro/mame`), shared by every project (keep it outside the NitrOS-9 tree; ours moved out
+  on 2026-09-30). Pull and build it there:
 
-      cd ~/projects/wild/mame && git pull --ff-only
+      cd $MAMEDIR && git pull --ff-only
       make SOURCES=src/mame/wildbits/wildbits_jr2.cpp NOWERROR=1 REGENIE=1 -j$(nproc)
 
   `NOWERROR=1` because MAME builds with warnings as errors and an upstream commit can leave a warning in
@@ -1337,18 +1353,18 @@ what they bought Tempest:
   new one has run a program, and check `make`'s exit status, not the tail of its log. Its source is also where
   MAME's drivers for arcade hardware can be read (for Tempest: `src/mame/atari/tempest.cpp`,
   `src/devices/video/avgdvg.cpp`, `src/mame/atari/mathbox.cpp`) — read, never edited. The **stock** MAME
-  (`/usr/games/mame`) is the other one: it runs the *arcade* original, for the captures of section 14a.
+  (`$ARCADE_MAME`) is the other one: it runs the *arcade* original, for the captures of section 14a.
 - **`-bios turbo`** (~8.8 MHz) is what the projects use; `stock` is 6.29 MHz.
 - **Mount a copy of the image**, not the recipe's own file: MAME writes into the image it mounts, and a
   run that crashes mid-write leaves it that way. Mind the size rule (below).
 - **Interactive**:
 
-      ~/projects/wild/mame/mame wbjr2 -window -skip_gameinfo -bios turbo \
-          -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
+      $MAMEDIR/mame wbjr2 -rompath $F256_ROMS -window -skip_gameinfo -bios turbo \
+          -hard $F256_IMAGE        # (a copy of it: see below)
 
 - **Headless and scripted**, the form for checks before a hardware run:
 
-      ~/projects/wild/mame/mame wbjr2 -bios turbo -hard /path/to/copy.dsk -skip_gameinfo \
+      $MAMEDIR/mame wbjr2 -rompath $F256_ROMS -bios turbo -hard /path/to/copy.dsk -skip_gameinfo \
           -video none -sound none -nothrottle \
           -autoboot_script drive.lua -snapshot_directory snap
 
@@ -1481,7 +1497,7 @@ This is mechanical, and every step of it has cost a session at least once:
 
 Addresses and register behaviour have several sources here and they do not agree. In order of authority:
 
-1. **The RTL** — a read-only clone of the FPGA core repo sits at `fpga-6809-cores-staging/`
+1. **The RTL** — a read-only clone of the FPGA core repo at `$FPGADIR`
    (`wildbitscomputing/fpga-6809-cores-staging`). It is the hardware, so it settles anything the documents
    disagree about — register decode, field widths, what a read-back really returns. **Reference only:
    never modify, never commit, never push anything inside it**; it is in `.gitignore` for that reason.
