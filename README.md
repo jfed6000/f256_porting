@@ -354,6 +354,7 @@ The calls the projects added (the ones used: **J** Joust, **T** Tempest, **K** T
 | Code | Call | Get/Set | What it does | Used |
 |---|---|---|---|---|
 | `$C6` | `SS.LiveKeys` | Get | key sense bits, the six ordinary keys held down; empties the input buffer | J T K |
+| `$C7` | `SS.MsCfg` | Get/Set | this terminal's mouse configuration in R$X low (the `MC.*` bits: e.g. `MC.Off` keeps the pointer hidden on this terminal); R$X high = the mouse speed 1-8 for the whole machine (0 = leave it) | — |
 | `$CF` | `SS.ClutWrite` | Set | CLUT entries from a buffer | J T K |
 | `$D1` | `SS.SprPush` | Set | put a range of the registered sprite table on screen | J K |
 | `$D3` | `SS.SprReg` | Set | register this terminal's sprite table, or give it up | J K |
@@ -366,6 +367,7 @@ The calls the projects added (the ones used: **J** Joust, **T** Tempest, **K** T
 | `$E6` | `SS.BmDef` | Set | point a bitmap at a block + offset the program owns | K |
 | `$E7` | `SS.BmLine` | Set | draw a batch of up to 255 line records on the line engine (section 7) | T |
 | `$E7` | `SS.BmLine` | Get | pixels still queued in the line engine's FIFO (built, never exercised) | — |
+| `$E8` | `SS.MsWheel` | Get | mouse wheel steps since the last call, signed, in R$X (0 without a wheel mouse); the wheel moved here from `SS.Mouse`'s R$U | — |
 | `$EA` | `SS.BmKill` | Set | undefine a bitmap; free its blocks only if the driver allocated them | — |
 | `$ED` | `SS.BmCfg` | Set | a bitmap's enable, CLUT, HIRES4 (640×240 4-bit) and palette group; `$FF` = leave alone | T K |
 | `$EE` | `SS.TsSet` | Set | define a tile set | J K |
@@ -387,8 +389,10 @@ folded into `SS.LiveKeys`) and is the approved code for `SS.MsDelta`, mouse moti
 in the driver yet (Tempest asks for it and runs without). **Reserved names without handlers:**
 `SS.ClutLoad`/`ClutCopy`/`ClutRead` `$CC-$CE`, `SS.TsAlloc` `$F0`, `SS.TsKill` `$F3`, `SS.TmAlloc` `$F6`,
 `SS.TmKill` `$FD`. **Spare:** `$D6-$E0` (the per-sprite codes the registered table made unnecessary),
-`$E8`, `$E9`, `$EB`, `$EC`, `$EF`, `$F1`, `$F2`, `$F5`, `$F7`, `$F9-$FC`, `$FE`, `$FF`. Taken by others in the same range: `$C7-$CB` VRN,
-`$D2` sc16550's `SS.DvrID`, `$E2` DriveWire's `SS.Fuji`.
+`$E9`, `$EB`, `$EC`, `$EF`, `$F1`, `$F2`, `$F5`, `$F7`, `$F9-$FC`, `$FE`, `$FF`. Codes are a driver's own, so the
+same number can mean something else on another device; the ones other Wildbits drivers use in this range are
+`$C7-$CB` VRN (so `SS.MsCfg` shares `$C7` with VRN, on a different path), `$D2` sc16550's `SS.DvrID`, `$E2`
+DriveWire's `SS.Fuji`. Pick a new code from the spare list, not from another driver's.
 
 **Read what a call hands back, not only what it takes.** `GetStat SS.BmClear` also returns the DMA's
 destination in R$Y and R$U, a diagnostic; a program that kept its data base in U across the call did not
@@ -1037,8 +1041,17 @@ the General MIDI synth: the 6809 sends notes, a few bytes a frame, and the chip 
   (`TinyVKY2K2_IO_Page0_Devices.v`: only five lines a port come from the connector, on the K2 and the
   Jr2), so **buttons 1 and 2 never read pressed, whatever stick is plugged in**. And many Atari-style
   sticks wire both of their buttons to pin 6 anyway. A game with a second action needs the keys or a pad
-  for it. **Paddles are impossible** for the same reason: DB9 pins 5 and 9 do not reach the FPGA, and
-  there is no analog path.
+  for it. **Paddles are impossible through the FPGA** for the same reason: DB9 pins 5 and 9 do not reach it,
+  and it has no analog path.
+- **Analog sticks on the K2, through the RP2040 (rc18 and later; not yet used by any project).** The K2's onboard
+  RP2040 supervisor reads analog values from joysticks 0 and 1 and publishes four 8-bit ADC samples in fixed I/O:
+  `RP.ADC0`-`RP.ADC3` at `$FE8A-$FE8D` (the hardware reference's "K2 RP2040 mailbox"). They are read directly
+  (`lda >RP.ADC0`), with no mailbox command; which channel is which axis depends on the supervisor's firmware and
+  the wiring, so map them by moving the stick. The rest of the mailbox (`$FE78-$FE7F`, `$FE88-$FE89`, `$FE8E-$FE8F`:
+  commands and FIFOs, polled, no interrupt) is the supervisor's own protocol and isn't needed for this. The Jr2
+  has no RP2040. A 6502 version for the Foenix machines is `github.com/hillsoftware/foenixanalog` (a different
+  CPU and different addresses). **Open:** how a driver should report it (a new `SS.Joy` mode, calibration and
+  centre, detecting that an analog stick is there at all) — undecided, and untested here for want of hardware.
 - **SNES pads** (`SS.Joy` mode 4 and up) give a second and third button. The driver keeps the low byte
   stick-compatible, so one decode serves both. **Guard it:** the program cannot tell whether a pad is
   plugged in, the first reading is empty, and an absent pad or an NES pad read in SNES mode shows buttons
