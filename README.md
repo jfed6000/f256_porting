@@ -5,7 +5,7 @@ port (a 6809 original, sprites and tiles), the Tempest port (a 6502 original, a 
 engine) and then Texas Shitkickers (an original game, designed in a browser and built for the F256: sprites,
 three scrolling tile layers, stage-by-stage loading, music on the SAM2695); none of it needs rediscovering.
 
-Read it as: **sections 1-3** before deciding anything, **4-7a** while designing, **8-12** while building,
+Read it as: **sections 1-3** before deciding anything, **4-7b** while designing (**7b is the K2's GPU**), **8-12** while building,
 **13** before every hardware run. **Section 14 is how to start a new port** — the survey each game needs,
 which goes in its own companion file — **14a is the method when the original's CPU is not a 6809**, and
 **14b is the method when there is no original at all**: a new game, designed first in a browser. **Section 3a**
@@ -104,12 +104,12 @@ Conventions worth repeating:
 
 ## 3. Level 2 is the environment, and its limit is logical space
 
-**The machine, as of 2026-10-11** (re-check on every new core; section 13, "Which source to believe"):
+**The machine, as of 2026-10-20** (re-check on every new core; section 13, "Which source to believe"):
 
 | | Now | Before |
 |---|---|---|
 | CPU | 6809 at **about 20 MHz** on Longview, K2 and Jr2. The turbo is adaptive (per the core documentation: RAM reads 20 MHz, RAM writes about 14 MHz, the fixed I/O at `$FE00-$FFEF` 6.29 MHz), so the speed-up depends on the instruction mix; measure, don't scale | 12 MHz on the late `v8` cores (the K2 from 2026-09-27); 8 MHz before. Every µs figure in this guide was measured at 8 MHz unless it says otherwise; CPU-bound costs scale down, driver-call costs roughly so, and anything tied to the frame (the 60 Hz tick, a DMA fill's vblank wait) not at all |
-| Core | **Longview** (K2 rc22/rc23, Jr2 rc24): the new memory map below | `v8_rc16`-`v8_rc20`: the old map, device pages at `$C0-$C4` |
+| Core | **Longview**: K2 **`Longview_rc26b`** ("Houston", built 2026-10-19: adds the GPU of section 7b and SP0250 speech), Jr2 **`Longview_rc25`** (no GPU: its FPGA has no room). The memory map below is the same on both. rc25 added a PCM port and VICKYDIS (sections 8 and 3) | `v8_rc16`-`v8_rc20`: the old map, device pages at `$C0-$C4`; K2 rc22/rc23, Jr2 rc24 earlier on Longview |
 | RAM | **2,016K** (252 blocks of 8K): `$00-$FB`, one contiguous pool; `$FC-$FF` are the device pages. 1,248K (`$00-$3F`, `$A0-$FB`) if `FLASHDIS` is off | Old map: 1,792K (224 blocks: `$00-$BF`, `$D0-$EF`) with `FLASHDIS`, 1 MB without |
 | How | Upstream NitrOS-9 main's kernel (`krnp2`) sets `FLASHDIS` when `MMU_IO_CTRL` bit 7 says the core has it, maps `$40-$9F` as RAM, and marks only `$FC-$FF` NotRAM. Tempest and Joust run on it on both machines (K2 rc22, Jr2 rc24, 2026-10-10). The 2,016K figure is the kernel's and the core documentation's. **Measured with Texas Shitkickers on a K2**: with nothing else running a program could allocate about 1,820K; the game took 1,704K and `mmap` showed 15 blocks (120K) free | A kernel and a core must agree on the map (below). An older core or kernel gives less RAM, so treat an `F$AllRAM` failure as a real outcome, and don't design an asset set that needs more than 1 MB without saying so |
 
@@ -132,6 +132,9 @@ What follows from it:
 - **A program or driver that maps a device page itself must use the symbols, never the numbers.** On a
   Longview core `$C0` is ordinary RAM: a write there corrupts whatever owns that block, and nothing appears
   on the screen. Offsets inside a page (`$1000` bitmaps, `$1300` sprites, ...) are unchanged.
+- **`MMU_IO_CTRL` (`$FFA1`) gained bits.** Bit 2 is FLASHDIS (rc22); **bit 3 is VICKYDIS (rc25), which maps
+  `$FC-$FF` to SRAM instead of the device pages**; bits 7:6 are read-only capability flags. Read-modify-write
+  it, never store a constant (per the hardware reference page; unexercised here).
 - **The kernel, the drivers and the core must be on the same map.** Upstream NitrOS-9 main is new-map only
   (since `fb10ce44`; the Wildbits terminal drivers joined it in PR #450, `b51f6f67`, 2026-10-10), so its
   images need a Longview core, and an old-map tree needs an old core. Rebuild the disk images when the core
@@ -520,6 +523,11 @@ frame**, 16-bit, halting the CPU about 384 µs (the DMA's time, not the CPU's: u
   failure; and count every fallback where the diagnostics can print it** (section 13).
 - The host model has to model the timing too (armed after line 42 → next tick; the CPU halt; busy until
   run). While it had the fill instant, it predicted none of the above.
+- **Its registers don't read back where they were written** (the hardware reference page, rc26): every
+  multi-byte field is big-endian, but the read decode returns both address quads reversed and the size and
+  stride pairs swapped. A driver that reads a register to check what it wrote must build that permutation in.
+  Logic operations (`DMA_OP_REG`, `$FED4`; bit 7 reads 1 where they exist) came in rc17. Give transfers a
+  timeout of at least ~40 ms: they run only in the vblank windows the scheduler grants.
 
 ## 7. The hardware line-draw engine (read from the RTL 2026-09-18; Tempest draws everything with it)
 
@@ -672,6 +680,135 @@ Two cautions:
   protecting. Tempest masks interrupts per use, and its host test model fails any coprocessor access made
   with interrupts unmasked, so a missed mask cannot slip through.
 
+## 7b. The GPU (K2, from rc26; read from the hardware reference 2026-10-20, not yet used by any project)
+
+*Source: the "3D / GPU" section of the WildBits hardware reference (`nitrobotics.github.io/Wildbits`), which
+cites the rc26 RTL (`PointPipe.v`, `SceneEngine.v`, `gpu3_top.v`, `gpu3_core.v`) and bit-exact host models. Nothing
+here has run on a machine in this project yet: treat it as section 7.1 was treated, prove each unit with a
+harness before designing on it, and check the page again on every core.*
+
+**Three independent units, each with its own registers and presence signature**; a program can use any one
+without the others. **The Jr2 has none of them** (no room in its FPGA) and reads `$FF` at every GPU address, so
+**test the presence signature and keep a path without it** — on the Jr2 that is the CPU and the line engine.
+
+| Unit | Where | Presence | Does |
+|---|---|---|---|
+| Point pipeline | fixed I/O `$FED8-$FEDF`, every task map | `STATUS` b2:0 = `%101` | transforms and projects single points for the CPU: push a point, pop its result |
+| SceneEngine | VICKY page (`VICKY_BLK`) `+$1780-$178F` | `STATUS` b2:0 = `%011` | runs a 3D display list into drawing records, to the CPU's FIFO or straight into the renderer |
+| Renderer | VICKY page `+$1800-$187F` | `GPU_ID` (`+$181F`) = `$34` | fills polygons and meshes into its own double-buffered frame, shown as a VICKY layer |
+
+**Conventions for all three:** words are written **high byte first**; the bus side runs on the 25 MHz I/O clock
+and the renderer's pixel work at 100 MHz. **Screen coordinates are sixteenths of a dot over a 640-dot frame**
+(0-10239 across; rows × 16 down), whatever the display mode.
+
+**The renderer is a fourth layer source, not a fourth layer.** **Layer code `%011` (3)** in any `LAYER_CTRL`
+slot shows the GPU's frame on that layer, while `GPU_CTRL.EN` is set — the same code that, on tile maps, would
+have selected the undisplayable map 3. It still has to share the three layers with the tiles and bitmaps.
+
+### 7b.1 The renderer (`VICKY_BLK:$1800-$187F`)
+
+A frame of up to 240 rows in the GPU's own block RAM, **640×240 at 16 colours or 320×240 at 256**, double
+buffered. Pixel 0 shows the layer beneath. Only the rows between `VIEW_ROW0` and `VIEW_ROW0 + VIEW_ROWS` are
+drawn or cleared, so a program can give the GPU a band of the screen and keep the rest for tiles or bitmaps.
+
+| Offset | Register |
+|---|---|
+| `$1800` | `GPU_CTRL`: b0 EN, b1 MODE (0 = 640×240×16, 1 = 320×240×256), b2 Z test, b3 dither, b4 RESET (write 1), b5 AUTOCLEAR at SWAP, b6 textures, b7 SEPORT (SceneEngine records go straight into the renderer) |
+| `$1801` | `STATUS`: b7 busy, b6 swap pending, b5 front buffer, b4 queue empty, b3 idle, b2 mesh error, b1 bad record, b0 overflow (writing 1 clears b2:0) |
+| `$1802/$1803` | `FIFO_FREE`: records the queue can take (512 when empty); **a read of `$1802` latches `$1803`** |
+| `$1804/$1805` | `SWAP_COUNT`, `FENCE_COUNT`: for pacing a program without an interrupt |
+| `$1806/$1807` | `VIEW_ROW0`, `VIEW_ROWS`: the rows the GPU owns |
+| `$1808/$1809` | `GPU_LUT` (b2:0 the CLUT, b6:4 the group), `CLEAR_COLOR` |
+| `$180A-$180D` | `UP_ADDR` (24-bit: target and address) and `UP_DATA` (auto-increment): meshes, textures and the shade table are uploaded here |
+| `$180E/$180F` | `SE_YMUL`: the row scale applied to SceneEngine records |
+| `$1810-$1814` | `PROBE_ROW`, `PROBE_DOT`, `PROBE_COLOR`: read back the colour of one chosen pixel |
+| `$181F` | `GPU_ID` = `$34` |
+| `$1840-$1847` | **the record window**: bytes 0-6 latch, **writing byte 7 (the opcode) pushes the record** |
+
+**Commands are 8-byte records** pushed through that window into a **512-record queue** and executed strictly in
+order:
+
+| Opcode | Record |
+|---|---|
+| `$00` LINE | a line between two screen points (pixel-exact with the line engine) |
+| `$01` SPAN, `$02` RECT, `$03` CLEAR, `$04` HSPLIT | a run on one row; a filled rectangle; the view rows in one colour; a row split in two colours at a point |
+| `$08` SWAP, `$09` FENCE | show the frame at the next vertical blank and start the next one; bump `FENCE_COUNT` when everything before it is drawn |
+| `$10` POLY (+ `$11` UV) | a filled polygon of 3-8 screen vertices with depth and shade; flags for Z test and write, Gouraud, texture, decal, dither, back-face cull |
+| `$20` SETMAT, `$21` SETLIGHT, `$22` SETPROJ | the view matrix (Q15) and eye; light direction, ambient and diffuse; focal X and Y, near plane, screen centre |
+| `$28` MESH | draw an uploaded mesh (offset, face count, material): the GPU transforms, lights, clips, projects and fills it |
+
+**Depth** is a 16-bit float of 228/z (4-bit exponent, 12-bit mantissa), so the Z test keeps 1/4096 of the
+distance at every range. **Memories:** 64 KB of mesh RAM (4,096 16-byte entries), 256 KB of 8-bit texels, a
+256-material shade table. **Speed:** one pixel pipeline, about 100 M depth-tested dots a second — 16 flat dots a
+clock at 640, half a dot a clock textured. (The record formats' byte layouts are not on the page; read them
+from the RTL or the host models before writing a record builder.)
+
+**Pacing without an interrupt:** push a frame's records, then SWAP; `SWAP_COUNT` and `FENCE_COUNT` tell the
+program how far the GPU has got, and `FIFO_FREE` how much it can push without waiting. rc26 also names a GPU
+interrupt, but the page gives no bit for it yet.
+
+### 7b.2 The SceneEngine (`VICKY_BLK:$1780-$178F`)
+
+A display-list processor with its own 8 KB + 8 KB of block RAM (variables `$0000-$1FFF`, the list
+`$4000-$5FFF`). Upload a list of ops and the variables they read (the viewer's position and matrix among them),
+write GO, and it walks the list: distance and bit tests skip whole areas, calls and returns nest 16 deep,
+origins and colours are set, and every point of a line, dot or polygon is transformed, clipped and projected.
+Out come drawing records in screen coordinates. **An op the hardware doesn't handle stops it with the op's
+address; the CPU does that step and writes RESUME.**
+
+| Offset | Use |
+|---|---|
+| `+0/+1` | read: pop the next output word, high byte (advances) then low |
+| `+2` | read `STATUS`: b7 output not empty, b6 busy, b5:3 state (idle, run, CPU op, done, fault), b2:0 `%011`. Write: `$01` GO, `$02` GO at ADDR, `$03` RESUME at the list pointer, `$04` ABORT |
+| `+3` | read: output words waiting (saturates at 255). Write: b0 abort and flush, b1 clear errors |
+| `+4/+5` | ADDR high/low |
+| `+6` | write a byte at ADDR, then ADDR+1; read it back (only while not busy) |
+| `+7/+8` | the list pointer: read = where the last stop was; write = where RESUME continues |
+| `+9/+A` | the last stop's op byte or fault code; errors (b0 access while busy, b1 output underflow) |
+
+Its records are vertices (screen X, Y, first flag), fill colours, 3D and screen lines, dots, a horizon split,
+variable write-backs, a CPU-op stop, a fault and the end. **The op set is Flight Simulator II's scenery
+language**, run op for op; with `GPU_CTRL.SEPORT` set the records bypass the CPU and go into the renderer.
+
+### 7b.3 The point pipeline (`$FED8-$FEDF`, fixed I/O)
+
+Load the viewer's rotation and position once, then push points; results come back in order through a 256-word
+FIFO, the first within a few I/O clocks, so a tight loop needs no polling.
+
+| Address | Use |
+|---|---|
+| `$FED8/$FED9` | write: a ground point x, z (two words). Read: pop a result word, high then low byte |
+| `$FEDA/$FEDB` | write: a 3D point x, y, z (three words) → X right, Y up, Z ahead of the viewer, flags/exponent, azimuth |
+| `$FEDC/$FEDD` | write: a camera point X, Y, Z → screen X, screen Y, view units |
+| `$FEDE` | write a command: `$01` matrix (9 words, Q15: 32767 = 1.0), `$02` eye (3 words), `$03` ground base sums (5 words), `$1x` mode (b0 delta points), `$2x` mark fence n, `$30` query. Read `STATUS`: b7 result ready, b6 busy, b5 input nearly full, b4 error, b2:0 `%101` |
+| `$FEDF` | write: b0 reset the FIFOs and errors, b1 clear errors. Read: result words waiting (0-255) |
+
+Result flags: b7 behind the viewer, b6/b5 off the right/left edge, b4/b3 off the top/bottom, b1 halved for
+range, b0 overflow. The projection's screen centre (dot 320, row 73.5) and row scale (a 147-row window) are
+fixed in rc26; for another window, project from the 3D port's X, Y, Z yourself, or use the renderer's SETPROJ.
+
+### 7b.4 Using it from NitrOS-9
+
+- **The point pipeline is fixed I/O,** like the DMA and the coprocessor (section 7a): an absolute-address
+  exception, global and unarbitrated, so the same cautions apply — mask interrupts around a sequence if
+  anything else might use it, and make the host model fail an unmasked access.
+- **The renderer and the SceneEngine are in the VICKY page,** which grfdrv256 owns. **grfdrv256 has no GPU calls
+  yet** (section 6's table). A program would either map `VICKY_BLK` itself (by symbol, never by number; and it
+  then owns the terminal-switch question: grfdrv256 knows nothing of the GPU, so it can't restore the GPU's
+  state on a switch, and the program's register writes should follow the `V.TermLive` rule) or, better, get calls added: push a batch of records, set the GPU's
+  control and view rows, upload into mesh or texture memory. The spare codes are listed in section 6.
+- **The GPU layer survives nothing by itself.** Its frame lives in the GPU's block RAM, not in blocks a program
+  owns, so the switch-it-off rule (section 6) becomes: clear `GPU_CTRL.EN` and take code 3 out of `LAYER_CTRL` on
+  every exit path.
+- **Which unit for what** (the reference's own advice): a model to show (a cube, a car, an aircraft) — upload
+  it as a mesh, then per frame SETMAT, SETLIGHT, MESH, SWAP, the renderer alone. Numbers back from 3D (where a
+  point lands, picking, radar, sprites placed in a 3D world) — the point pipeline, with the line engine or GPU
+  records to draw. A large world described once and culled by distance in hardware — the SceneEngine, into the
+  renderer through SEPORT or to the CPU. And **for 2D games the renderer is a fast double-buffered drawing
+  layer**: RECT, SPAN, LINE and CLEAR records into a 320×240×256 frame, swapped at the vblank, would retire the
+  "erase the bitmap every frame" problem of section 14's survey for anything that can be drawn as spans and
+  rectangles — on the K2.
+
 ## 8. Sound
 
 Joust's answer was **one continuous PCM stream through the VS1053**, its registers at `$FF50-$FF57`
@@ -692,6 +829,11 @@ section 8.4; Texas Shitkickers on the SAM2695, section 8.5; the rest are unexerc
   sound is a waveform-and-envelope description rather than a recording.
 - **PSG ×3** (left, both, right) — square waves and noise, the cheapest of the lot, and a close match for
   arcade hardware of that generation.
+- **PCM (rc25)** — 16-bit stereo samples written by the CPU at `$FF9A-$FF9E` (`$FF9E` its status),
+  software-timed: the program is the sample clock. Unexercised here.
+- **SP0250 speech (K2, rc26)** — the LPC speech chip of several arcade boards: write a 15-byte frame a byte at a
+  time to `$FF9F`; reading `$FF9F` gives b7 present, b0 ready, and **a write while ready reads 0 is ignored**.
+  Unexercised here; the Jr2 doesn't have it.
 
 **On a Longview core the only way in is the fixed-decode sound block** — `$FF91-$FF93` the PSGs (left,
 both, right), `$FF94-$FF97` the OPL3's two address/data pairs, `$FF98` a SID selector and `$FF99` SID
@@ -1409,7 +1551,7 @@ worked example.
 |---|---|
 | Is there an original at all? | A new game has no listing and no ROM to check against: design it in a browser under the F256's rules and port that (section 14b) |
 | What CPU is the source? | 6809 is a transcription with the arcade labels intact; anything else is a translation, and the per-routine checking that replaces "compare against the listing" has to be planned: section 14a |
-| What does the display *actually* consist of? | Moving objects → sprites; static background → tile map; text, effects and anything hand-plotted → bitmaps; lines → the line engine (section 7). Most games are a mixture, and the mixture is the design |
+| What does the display *actually* consist of? | Moving objects → sprites; static background → tile map; text, effects and anything hand-plotted → bitmaps; lines → the line engine (section 7); filled polygons, 3D, or a whole frame redrawn each frame → the GPU, on the K2 only, with a path for the Jr2 (section 7b). Most games are a mixture, and the mixture is the design |
 | Does it redraw the screen wholesale each frame? | If yes, erasing is a first-class problem with no free answer at 76,800 bytes a frame — settle it before anything else: a DMA clear of a double-buffered bitmap, armed a tick ahead (section 6a) |
 | How many distinct moving objects at once? | 128 sprite records exist, and all of them survive a terminal switch through the registered table (section 6) |
 | What is the original's frame rate and interrupt rate? | Rarely 60 Hz. Its IRQ becomes a virtual interrupt on an exact ratio of the tick, and its frame gate needs a carry (section 12.2). Measure its own per-frame work in MAME: that is the budget the port has to beat |
