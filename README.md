@@ -1,4 +1,6 @@
-# Porting an arcade game to NitrOS-9 Level 2 on the Wildbits F256
+# Writing games for NitrOS-9 Level 2 on the Wildbits F256
+
+*Porting an arcade game or making a new one: the platform, the method, and what three projects learned.*
 
 **The generic guide: what is true of any game.** Everything here was paid for once already, on the Joust
 port (a 6809 original, sprites and tiles), the Tempest port (a 6502 original, a vector display on the line
@@ -6,16 +8,18 @@ engine) and then Texas Shitkickers (an original game, designed in a browser and 
 three scrolling tile layers, stage-by-stage loading, music on the SAM2695); none of it needs rediscovering.
 
 Read it as: **sections 1-3** before deciding anything, **4-7b** while designing (**7b is the K2's GPU**), **8-12** while building,
-**13** before every hardware run. **Section 14 is how to start a new port** — the survey each game needs,
+**13** before every hardware run. **Section 14 is how to start a project** — the survey each game needs,
 which goes in its own companion file — **14a is the method when the original's CPU is not a 6809**, and
 **14b is the method when there is no original at all**: a new game, designed first in a browser. **Section 3a**
-is what to do when a program outgrows the module budget, and **section 15 is how to work on all of this with
-Claude**.
+is what to do when a program outgrows the module budget, **section 15 is how to work on all of this with
+Claude**, and **section 16 lists what nobody here has tried yet**.
 
 **Starting a project? Copy [`starter/`](starter/)**: the smallest complete F256 program (graphics memory, a CLUT, a
 scrolling tile map, a sprite, held keys, a note, the pause and the clean exit, about 1.3K of 6809, checked in
 MAME), with a makefile, an art generator and a MAME script. And copy [`CLAUDE-template.md`](CLAUDE-template.md) to
 the new project as `CLAUDE.md`.
+
+**Contents.** [1. The shape of the job](#1-the-shape-of-the-job) · [2. Project layout that worked](#2-project-layout-that-worked) · [3. Level 2 is the environment, and its limit is logical space](#3-level-2-is-the-environment-and-its-limit-is-logical-space) · [3a. When the program outgrows the module: stage modules](#3a-when-the-program-outgrows-the-module-stage-modules) · [4. Position-independent code](#4-position-independent-code) · [5. The data area and base-register convention](#5-the-data-area-and-base-register-convention) · [6. Graphics: let the hardware do it](#6-graphics-let-the-hardware-do-it) · [6a. The DMA engine](#6a-the-dma-engine-read-from-the-rtl-2026-09-18-used-by-tempest-through-ssbmclear) · [7. The hardware line-draw engine](#7-the-hardware-line-draw-engine-read-from-the-rtl-2026-09-18-tempest-draws-everything-with-it) · [7a. The other coprocessors](#7a-the-other-coprocessors) · [7b. The GPU](#7b-the-gpu-k2-from-rc26-read-from-the-hardware-reference-2026-10-20-not-yet-used-by-any-project) · [8. Sound](#8-sound) · [9. Input](#9-input) · [10. Being a good OS-9 citizen](#10-being-a-good-os-9-citizen) · [11. Driver work in the NitrOS-9 tree](#11-driver-work-in-the-nitros-9-tree) · [12. Frame architecture](#12-frame-architecture) · [13. Working method (the expensive lessons)](#13-working-method-the-expensive-lessons) · [14. Starting a project: the survey](#14-starting-a-project-the-survey) · [14a. When the original is not a 6809: translating, with the ROM as the oracle](#14a-when-the-original-is-not-a-6809-translating-with-the-rom-as-the-oracle) · [14b. When there is no original: design it in a browser first](#14b-when-there-is-no-original-design-it-in-a-browser-first) · [15. Working with Claude on a port](#15-working-with-claude-on-a-port) · [16. Not yet tried](#16-not-yet-tried) · [Appendix: the one-page checklist](#appendix-the-one-page-checklist)
 
 **Per-game companions** (this guide stays generic; nothing game-specific belongs in it):
 
@@ -26,12 +30,19 @@ the new project as `CLAUDE.md`.
 | Texas Shitkickers repo: `f256/ARCHITECTURE.md`, `f256/docs/port-plan.md`, `game/docs/f256-plan.md` | Texas Shitkickers — the browser-first method (14b), stage modules (3a), sprite banks and text in sprite cells (6), the SAM2695 (8.5) |
 
 Source of the lessons: each repo's `docs/status.md` (hardware findings), Joust's `docs/interfaces.md`,
-`docs/data-area.md`, `docs/game-logic.md`, `docs/grfdrv256-api.md`, and the two trees themselves. Where
+`docs/data-area.md`, `docs/game-logic.md`, `docs/grfdrv256-api.md`, Texas Shitkickers' `f256/docs/port-plan.md`, and
+the three trees themselves. Where
 this guide states a hardware fact it is one that was confirmed on a K2, unless it says otherwise. The games
 are cited throughout as the evidence, not as the subject.
 
 *This repo is the guide's only copy (since 2026-10-03); `docs/port-guide.md` in Joust and Tempest just
 points here.*
+
+> **Timings are stale.** Most µs figures in this guide were measured at **8 MHz**, on the cores of September
+> 2026 (cycle counts don't change with the clock; microseconds do). The machines now run at about **20 MHz** (Longview; section 3), so CPU-bound costs are lower,
+> driver-call costs roughly so, and anything tied to the frame (the 60 Hz tick, a DMA fill's vblank wait) not at
+> all. Treat a figure as a ranking, not a budget, until it's re-measured; a refresh on the current core is
+> pending (section 16).
 
 **Your machine.** Paths in this guide are written as these shell variables. Set them once: copy
 [`env.sh.example`](env.sh.example) to `env.sh`, fill in your directories, and `. ./env.sh` in each shell (or from
@@ -1127,6 +1138,13 @@ program people can use.
   the game cannot be itself without them; a VS1053 that does not answer leaves `SNDON` clear and the game
   **runs silent**. Both are better than a hang, and the difference is a judgement someone has to make
   deliberately rather than discover on the hardware.
+- **Save the high scores, and treat the file as optional.** An original game has no CMOS to model, but the
+  same answer as Joust's settings (section 5) works: a small file in the game's own directory, read at start-up
+  and written at game over or on quit — never in the frame loop. A missing or short file means defaults, not
+  an error; a version byte at the front lets a later build tell an old file from its own; and a failed write
+  costs the save, not the game (decide it as "degraded", section 10's rule below). Create it with `I$Create` the
+  first time and rewrite it in place (`I$Seek` to 0) after that. *Texas Shitkickers doesn't do this yet: its
+  high score lasts until you quit.*
 - **Ship it the way it's installed.** A release zip holds the module as `CMDS/<game>` and the data as
   `<GAME>/` — not `<game>` and `<GAME>/` side by side, which are the same name on a case-insensitive disk
   (macOS's default, Windows'): a player reported the zip wouldn't unpack. Add a README with the install
@@ -1573,7 +1591,7 @@ engine plausibly right. **When two sources disagree, say so in the doc and mark 
   assets, its tools) is gone. Back the image up first and copy the rest back, compared. The recipe also
   rebuilds `.mods` for one machine at a time (section 11), so empty it before each platform's build.
 
-## 14. Starting a new port: the survey
+## 14. Starting a project: the survey
 
 Everything above is the platform. What changes per game is small, and it is worth finding out *before*
 any design work, because two or three answers decide the whole shape of the port. Write the answers into
@@ -1806,6 +1824,29 @@ wrong when it didn't:
 design in the browser and play it → port one system → host model → MAME → the person's hardware run → fix →
 commit and push → a line in the handoff. Small steps, each one proven before the next, and the person's
 judgement on every design question.
+
+## 16. Not yet tried
+
+What the hardware and the drivers offer that no project here has used or proven, gathered from the sections
+above (as of 2026-10-21). Anything on this list needs a harness and a hardware run before a design leans on it
+(section 14's order, step 2).
+
+| What | Where it's described | What's unknown |
+|---|---|---|
+| **Timings on the current core** | throughout (the note at the top) | most cost figures are from 8 MHz; the ~20 MHz machines need the key ones re-measured: a driver call, `SS.SprPush` per record, `F$MapBlk`, `SS.TmScrl` |
+| The GPU's three units (K2, rc26) | 7b | everything: read from the reference page, never run; the record byte layouts aren't documented there |
+| The OPL3 | 8 | write-only with no status; its write timing and a register shadow |
+| The PSGs as a sound source | 8 | unexercised beyond grfdrv256's own use |
+| PCM (rc25) | 8 | the CPU is the sample clock: what a frame loop can sustain |
+| SP0250 speech (K2, rc26) | 8 | the frame format in practice; feeding it from a game |
+| Analog sticks via the RP2040 (K2) | 9 | which ADC channel is which axis; how a driver should report them; untested for want of hardware |
+| SNES pads on a real pad | 9 | Tempest's support was written from the RTL's bit order and never run on a pad |
+| Mouse motion as counts (`SS.MsDelta`) | 6, 9 | approved code `$D0`, not in the driver |
+| Square tile sets (CFG bit 3) | 6 | every program here uses linear sets |
+| The coprocessor's floating point | 7a, 14 | the integer divide is used; the floating-point registers aren't |
+| Sprites and line drawing together | 14 | never combined in one program |
+| Texas Shitkickers on a Jr2 | 11 | run only on the K2 (the Jr2 has no GPU or speech, but the game uses neither) |
+| The SAM2695 heard through MAME | 8.5, 13 | MAME's MIDI out to fluidsynth is documented upstream, not tried here |
 
 ---
 
