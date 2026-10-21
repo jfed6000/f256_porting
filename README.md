@@ -1,12 +1,15 @@
 # Porting an arcade game to NitrOS-9 Level 2 on the Wildbits F256
 
 **The generic guide: what is true of any game.** Everything here was paid for once already, on the Joust
-port (a 6809 original, sprites and tiles) and then the Tempest port (a 6502 original, a vector display on
-the line engine); none of it needs rediscovering.
+port (a 6809 original, sprites and tiles), the Tempest port (a 6502 original, a vector display on the line
+engine) and then Texas Shitkickers (an original game, designed in a browser and built for the F256: sprites,
+three scrolling tile layers, stage-by-stage loading, music on the SAM2695); none of it needs rediscovering.
 
 Read it as: **sections 1-3** before deciding anything, **4-7a** while designing, **8-12** while building,
 **13** before every hardware run. **Section 14 is how to start a new port** — the survey each game needs,
-which goes in its own companion file — and **14a is the method when the original's CPU is not a 6809**.
+which goes in its own companion file — **14a is the method when the original's CPU is not a 6809**, and
+**14b is the method when there is no original at all**: a new game, designed first in a browser. **Section 3a**
+is what to do when a program outgrows the module budget.
 
 **Per-game companions** (this guide stays generic; nothing game-specific belongs in it):
 
@@ -14,6 +17,7 @@ which goes in its own companion file — and **14a is the method when the origin
 |---|---|
 | Tempest repo: `docs/port-tempest.md`, `docs/port-plan.md`, `docs/status.md` | Tempest — the survey, the translation from 6502, the line-engine display, the SIDs, the SOL clock; the worked example of section 14a |
 | Joust repo: `docs/port-plan.md`, `docs/interfaces.md`, `docs/game-logic.md`, `docs/data-area.md` | Joust — the worked example of every convention here |
+| Texas Shitkickers repo: `f256/ARCHITECTURE.md`, `f256/docs/port-plan.md`, `game/docs/f256-plan.md` | Texas Shitkickers — the browser-first method (14b), stage modules (3a), sprite banks and text in sprite cells (6), the SAM2695 (8.5) |
 
 Source of the lessons: each repo's `docs/status.md` (hardware findings), Joust's `docs/interfaces.md`,
 `docs/data-area.md`, `docs/game-logic.md`, `docs/grfdrv256-api.md`, and the two trees themselves. Where
@@ -90,6 +94,13 @@ Conventions worth repeating:
 - **Make the machine-checkable rules makefile targets, not intentions:** the module size budget, the
   static PIC check, the asset slot sizes. A rule nobody can forget to run is worth three in a document.
 - **`docs/status.md` is the handoff.** Sessions end and context is lost; the doc is what survives.
+- **The converter can be the prototype itself.** Texas Shitkickers draws all its art at run time in a browser
+  prototype (section 14b); `tools/export.py` runs that prototype headless (Chromium, `?export`) and it writes
+  the binaries and the generated defs file. Nothing is drawn twice, and changing a sprite is changing the
+  prototype and re-exporting.
+- **Commit the converter's output if anyone will build without the converter.** A game shared on its own
+  (without the prototype or the host tool chain) can't regenerate its assets, so the binaries go in git beside
+  the generated defs that describe them. Then prove it: a fresh clone must build a byte-identical module.
 
 ## 3. Level 2 is the environment, and its limit is logical space
 
@@ -100,7 +111,7 @@ Conventions worth repeating:
 | CPU | 6809 at **about 20 MHz** on Longview, K2 and Jr2. The turbo is adaptive (per the core documentation: RAM reads 20 MHz, RAM writes about 14 MHz, the fixed I/O at `$FE00-$FFEF` 6.29 MHz), so the speed-up depends on the instruction mix; measure, don't scale | 12 MHz on the late `v8` cores (the K2 from 2026-09-27); 8 MHz before. Every µs figure in this guide was measured at 8 MHz unless it says otherwise; CPU-bound costs scale down, driver-call costs roughly so, and anything tied to the frame (the 60 Hz tick, a DMA fill's vblank wait) not at all |
 | Core | **Longview** (K2 rc22/rc23, Jr2 rc24): the new memory map below | `v8_rc16`-`v8_rc20`: the old map, device pages at `$C0-$C4` |
 | RAM | **2,016K** (252 blocks of 8K): `$00-$FB`, one contiguous pool; `$FC-$FF` are the device pages. 1,248K (`$00-$3F`, `$A0-$FB`) if `FLASHDIS` is off | Old map: 1,792K (224 blocks: `$00-$BF`, `$D0-$EF`) with `FLASHDIS`, 1 MB without |
-| How | Upstream NitrOS-9 main's kernel (`krnp2`) sets `FLASHDIS` when `MMU_IO_CTRL` bit 7 says the core has it, maps `$40-$9F` as RAM, and marks only `$FC-$FF` NotRAM. Tempest and Joust run on it on both machines (K2 rc22, Jr2 rc24, 2026-10-10). The 2,016K figure is the kernel's and the core documentation's; **nobody here has measured free RAM on it** | A kernel and a core must agree on the map (below). An older core or kernel gives less RAM, so treat an `F$AllRAM` failure as a real outcome, and don't design an asset set that needs more than 1 MB without saying so |
+| How | Upstream NitrOS-9 main's kernel (`krnp2`) sets `FLASHDIS` when `MMU_IO_CTRL` bit 7 says the core has it, maps `$40-$9F` as RAM, and marks only `$FC-$FF` NotRAM. Tempest and Joust run on it on both machines (K2 rc22, Jr2 rc24, 2026-10-10). The 2,016K figure is the kernel's and the core documentation's. **Measured with Texas Shitkickers on a K2**: with nothing else running a program could allocate about 1,820K; the game took 1,704K and `mmap` showed 15 blocks (120K) free | A kernel and a core must agree on the map (below). An older core or kernel gives less RAM, so treat an `F$AllRAM` failure as a real outcome, and don't design an asset set that needs more than 1 MB without saying so |
 
 **The memory map moved (Longview, 2026-10).** The device pages went from `$C0-$C4` to the top of the block
 space, and the blocks they left became RAM:
@@ -144,6 +155,13 @@ itself — Tempest gained nothing from 8 → 12 MHz until a frame gate that quan
   (`make EXTRA="-DTSND"`, `-DDIAG`: the shipping build carries neither), and deleting machinery that a
   later design made unnecessary rather than leaving it switched off. Dropping to four blocks to free a
   window was costed (6,800 bytes out) and declined.
+- **The top block is the trap.** The process's top block ends with the system's 768 bytes (`$FD00-$FFFF`).
+  While a module is small it sits in the top blocks; once it grows past three blocks less 768 bytes (23,808
+  bytes) NitrOS-9 places it lower, the top block goes to whatever window is mapped next, and the first 8K read
+  into that window fails (`E$Read`, 244) — at start-up, far from any change. Texas Shitkickers maps a window it
+  keeps for good (its music) **first**, so that window owns the top block and every other window gets a whole
+  one; anything read into the kept window must then stay under 8,192 − 768 bytes (its songs: 7,424, checked by
+  the converter).
 - **Never hold more than the two 1-block service windows at any moment, start-up included.** Joust once
   used two 2-block windows during start-up; that fits a 3-block module and not a 4-block one, so the
   failure appeared only when the module grew past 24,576 bytes — far below its real limit and nowhere
@@ -151,8 +169,14 @@ itself — Tempest gained nothing from 8 → 12 MHz until a frame gate that quan
 - **Assets live outside the 64K.** `F$AllRAM` blocks anywhere in RAM (2,016K on a Longview core, less on older ones; section 3); map one in with `F$MapBlk`,
   read the file into it, `F$ClrBlk`. (**Known wart:** `F$AllRAM`/`F$DelRAM` from an application is
   technically a system call. The answer now exists in grfdrv256 — **`SS.GfxAlloc` `$D4` / `SS.GfxFree`
-  `$D5`**, N consecutive blocks the program owns, confirmed on the K2 2026-09-20 — but neither Joust nor
-  Tempest has moved to it; both still call `F$AllRAM`. A new port should use the SS calls.)
+  `$D5`**, N consecutive blocks the program owns, confirmed on the K2 2026-09-20. Joust and Tempest still call
+  `F$AllRAM`; **Texas Shitkickers allocates everything with `SS.GfxAlloc`** (about 1.7 MB in seven runs) and it
+  works on the K2. A new port should use the SS calls.)
+- **Allocate it all at start-up, and say what's missing when it fails.** A game that allocates as it goes can
+  run out halfway through a level. Texas Shitkickers asks for everything in one routine before loading
+  anything, and a stage change only reloads the same blocks. If an allocation fails the program cleans up and
+  prints how much it needs (a figure the assembler works out from the same equates the allocation uses) and
+  what to try. A bare `ERROR #207` tells a player nothing.
 - **`F$AllRAM` searches the block map from the bottom up; `F$AlHRAM` from the top down.** Same allocator,
   opposite direction, and the convention is that graphics go high. **`F$AlHRAM` is system-state only** —
   registered `F$AlHRAM+SysState` in the Level 2 kernel's `svctab` — so an application cannot call it and a
@@ -168,6 +192,32 @@ itself — Tempest gained nothing from 8 → 12 MHz until a frame gate that quan
 - **`F$Sleep` X = 1 only yields the time slice.** A 60 Hz frame wait is `ldx #2`. X = n sleeps n−1 ticks.
   The 60 Hz tick is the VICKY start-of-frame interrupt. A loop built only on `F$Sleep` loses game time
   whenever a pass overruns its tick; section 12.2 is the answer.
+
+## 3a. When the program outgrows the module: stage modules
+
+Texas Shitkickers' core module is capped at 32K (section 3's eight blocks, less its kept windows), and seven
+stages with their bosses and gimmicks need far more code than that. What worked:
+
+- **Each stage's own code is a module of its own, at most 8K, loaded with the stage.** The core keeps the
+  platform, the hero, the common enemies and everything two stages share; a stage module holds that stage's
+  boss and gimmicks. `F$Link` it if something already loaded it, else `F$Load` it; `F$UnLink` it when the next
+  stage's comes. NitrOS-9 maps it into the process's free block, so one block of the eight is the "stage slot".
+- **Calls cross the line through slots in the data area, never by address.** Two tables of addresses filled
+  at run time: hooks (stage routines the core calls; each points at a do-nothing routine when the stage has
+  none, with a carry-set variant where "nothing" must mean "no") and core vectors (core routines a module
+  calls). Each side calls the other through a one-instruction stub (`jmp [HK.x,u]`), so the sources still call
+  each other by name, about 8 cycles dearer a call.
+- **Generate the glue; don't write it.** `tools/stagegen.py` reads every source each build and writes the slot
+  equates, the stubs, the module's hook table and the core's address table. It also refuses what would break:
+  a module routine another module calls, a module constant the core uses, a core table a module takes the
+  address of. Those go in the core. **One trap:** it matched names without case (as lwasm does), so a module's
+  local label that happened to match a core label became a call into the core — prefix module locals.
+- **Load the modules from the game's own directory.** A relative name in `F$Load` resolves through the
+  *execution* directory (CMDS), not the data directory. The game does `I$ChgDir "."` with `PEXEC.` at start-up:
+  its own execution directory becomes the directory it was started in, so the modules live beside the art and
+  the shell's CMDS is untouched (each process has its own pair of directories).
+- **The host model must load modules too**, and stop the run on a second load without an unlink: that is the
+  leak a stage change would otherwise hide.
 
 ## 4. Position-independent code
 
@@ -189,6 +239,9 @@ The conversion rules, which held for ~28 KB of 6809 arcade code:
      every register busy. Keep a **kind per word** in the fix-up list: module address, data-area address,
      constant, and 0 stays 0 (0 usually means "none"). Joust's `reloc.a` does this with a layout string
      per table (`M`/`D`/`K`/`B`).
+   **This bites new code as readily as converted code.** Texas Shitkickers' boss-entrance table (`fdb STwoBit`,
+   a string's address) was written fresh, late in the project, and hung the program in a loop over garbage the
+   first time it ran; it holds offsets now. Every table of addresses, every time.
 5. **Data access goes through a base register held in direct page**, see section 5.
 6. **Write the static checker early.** `tools/piccheck.py` reads the lwasm listing, classifies every
    symbol as code/data/constant and reports extended operands, immediates holding addresses, code labels
@@ -273,28 +326,28 @@ is `$FC` on a Longview core and was `$C0`; `FONT_BLK` is `$FD` and was `$C1`. Th
 reference for the tile calls. **The dispatch tables are the authority**: the API doc still lists `$D0` as
 `SS.KyDwn`, which is gone.
 
-The calls the projects added (the ones used: **J** Joust, **T** Tempest):
+The calls the projects added (the ones used: **J** Joust, **T** Tempest, **K** Texas Shitkickers):
 
 | Code | Call | Get/Set | What it does | Used |
 |---|---|---|---|---|
-| `$C6` | `SS.LiveKeys` | Get | key sense bits, the six ordinary keys held down; empties the input buffer | J T |
-| `$CF` | `SS.ClutWrite` | Set | CLUT entries from a buffer | J T |
-| `$D1` | `SS.SprPush` | Set | put a range of the registered sprite table on screen | J |
-| `$D3` | `SS.SprReg` | Set | register this terminal's sprite table, or give it up | J |
-| `$D4` | `SS.GfxAlloc` | Set | N consecutive RAM blocks, owned by the program (section 3) | — |
-| `$D5` | `SS.GfxFree` | Set | give them back; refuses a driver-owned bitmap's blocks | — |
+| `$C6` | `SS.LiveKeys` | Get | key sense bits, the six ordinary keys held down; empties the input buffer | J T K |
+| `$CF` | `SS.ClutWrite` | Set | CLUT entries from a buffer | J T K |
+| `$D1` | `SS.SprPush` | Set | put a range of the registered sprite table on screen | J K |
+| `$D3` | `SS.SprReg` | Set | register this terminal's sprite table, or give it up | J K |
+| `$D4` | `SS.GfxAlloc` | Set | N consecutive RAM blocks, owned by the program (section 3) | K |
+| `$D5` | `SS.GfxFree` | Set | give them back; refuses a driver-owned bitmap's blocks | K |
 | `$E3` | `SS.BmAlloc` | Set | allocate a bitmap and define it; the driver owns the blocks | — |
 | `$E4` | `SS.BmBlk` | Get | a bitmap's first block and control byte | J T |
 | `$E5` | `SS.BmClear` | Set | fill a bitmap on the DMA engine, asynchronously (section 6a) | T |
 | `$E5` | `SS.BmClear` | Get | busy or idle; also R$Y:R$U = the DMA's destination (below) | — |
-| `$E6` | `SS.BmDef` | Set | point a bitmap at a block + offset the program owns | — |
+| `$E6` | `SS.BmDef` | Set | point a bitmap at a block + offset the program owns | K |
 | `$E7` | `SS.BmLine` | Set | draw a batch of up to 255 line records on the line engine (section 7) | T |
 | `$E7` | `SS.BmLine` | Get | pixels still queued in the line engine's FIFO (built, never exercised) | — |
 | `$EA` | `SS.BmKill` | Set | undefine a bitmap; free its blocks only if the driver allocated them | — |
-| `$ED` | `SS.BmCfg` | Set | a bitmap's enable, CLUT, HIRES4 (640×240 4-bit) and palette group; `$FF` = leave alone | T |
-| `$EE` | `SS.TsSet` | Set | define a tile set | J |
-| `$F4` | `SS.TmSet` | Set | define a tile map | J |
-| `$F8` | `SS.TmScrl` | Set | scroll a tile map | — |
+| `$ED` | `SS.BmCfg` | Set | a bitmap's enable, CLUT, HIRES4 (640×240 4-bit) and palette group; `$FF` = leave alone | T K |
+| `$EE` | `SS.TsSet` | Set | define a tile set | J K |
+| `$F4` | `SS.TmSet` | Set | define a tile map | J K |
+| `$F8` | `SS.TmScrl` | Set | scroll a tile map (Texas Shitkickers: three layers a pass, for parallax) | K |
 | `$13` | `SS.Joy` | Get | modes 2-6 added: both sticks in one call; NES and SNES pads (section 9) | J T |
 
 The older calls it keeps (CoCo and early-Wildbits codes, by name): **Get** `SS.ScSiz`, `SS.ScTyp`,
@@ -362,6 +415,51 @@ Patterns that fell out of it:
 - **Palette model:** keep the original's palette RAM in its own format, and convert only the changed
   entries at the frame commit into one `SS.ClutWrite`. Joust uses MAME's resistor-weighted levels for the
   original board, which is why the photographs match.
+
+**Sprite games: what Texas Shitkickers learned** (32×32 sprites only, three tile layers, no bitmap in play):
+
+- **A character is a list of cells, not a sprite.** Cut every animation frame into 32×32 cells, deduplicate
+  identical cells, and keep a *frame record* per frame: a cell count, then each cell's dx, dy from the frame's
+  origin and its cell number. Drawing a character is one sprite record per cell. Keep the frame records in a
+  graphics block mapped while drawing, not in the data area; they grow with every character added.
+- **A cell's offset is a signed byte**, so every cell of a frame must lie within −128..127 px of the frame's
+  origin. A long, wide thing (a 139-px speech bubble) has to be anchored *inside* itself, and the code adds the
+  difference back. The converter must refuse a frame that breaks it.
+- **No flip bit means every left-facing frame is stored twice.** In Texas Shitkickers that is about 43% of all
+  the sprite memory (the hero alone is ~520K with his mirrors), the single biggest cost in the game, and the
+  reason a second player could not be added. The DMA engine can't help: it copies forward only, and only in
+  the vblank. Budget for it from the start.
+- **Depth-sort a display list each pass, nearest first** (sprite 0 is on top), then expand it into records:
+  shadows after every character so nothing stands behind its own shadow, and the HUD built first so it's in
+  front of everything. One `SS.SprPush` over the records used.
+- **Text in a sprite-only game is sprites.** All three layers are scenery, so there is nothing to print on.
+  Fixed words are pre-drawn by the converter, one frame each. Changing text (a score, a name, a count) is
+  drawn by the 6809 into **dynamic cells**: sprite cells allocated after the art that the program writes into
+  through a mapped block, from a small outlined font. **Spread it over passes** — five letters a pass, or one
+  letter a pass for a name that types on — because stamping a whole name at once made the worst pass of a
+  fight. Clear the dynamic cells at start-up (below).
+- **Graphics memory is not cleared for you.** `SS.GfxAlloc` hands back whatever was in RAM. On the hardware
+  that is noise; **MAME starts RAM at zero**, so a cell nothing was written to is invisible there and a 32×32
+  square of noise on the machine. Clear what you allocate, or make sure nothing ever shows a cell you haven't
+  loaded.
+- **Stage banks, to fit more art than memory.** The cells every stage draws stay loaded; each stage's own
+  (its boss, its props, its words) load into one slot sized for the biggest stage. The rule that follows is
+  strict: **a frame must only be drawn on a stage whose bank holds it.** Texas Shitkickers' High Noon had
+  rattlesnakes in its waves but not in its bank: noise on the K2, nothing in MAME, and found by a host check
+  that compares every frame drawn against the loaded bank. A group used on several stages goes in every one of
+  their banks, and first in each, so its cells and records sit at the same place in all of them.
+- **Split the sprite palette between what's shared and what's the stage's.** Colours used by shared art count
+  up from entry 1; each stage's own count down from 255; a stage's whole CLUT is loaded with the stage. The
+  converter refuses a stage that doesn't fit. Tiles likewise get a palette per stage.
+- **Fade with precomputed CLUTs.** Night falling, a tunnel, a siege at dusk: Texas Shitkickers keeps 61 copies
+  of the stage's tile palette, 1% apart toward night (the lamps left lit), and steps through them with
+  `SS.ClutWrite`. No colour arithmetic on the 6809, and 1% steps look smooth where 5% ones looked abrupt on the
+  K2.
+- **Reuse a slot for a full-screen picture.** The ending's 76,800-byte bitmap loads into the tile blocks (free
+  by then): `SS.BmDef` points bitmap 0 at blocks the program owns, `SS.BmCfg` gives it a CLUT, the other layers
+  go blank, and undoing it all before the next stage loads is the program's job (the switch-it-off rule above).
+- **The tile map is live memory.** Changing the scenery (Texas Shitkickers' church doors splintering) is a
+  copy of tile cells into the mapped map block: no call, and it darkens with the stage's fade for free.
 
 Two drawing bugs that are worth knowing by name, because both classes recur:
 
@@ -581,7 +679,7 @@ written directly. That is the project's single approved absolute-I/O exception, 
 is fixed and no MMU is involved.
 
 **The VS1053 is not the only option, and it may not even be free.** The others (Tempest plays on the SIDs,
-section 8.4; the rest are unexercised):
+section 8.4; Texas Shitkickers on the SAM2695, section 8.5; the rest are unexercised):
 
 - **SAM2695 (Dream)** — a General MIDI synthesiser: notes and instruments over a MIDI stream rather than
   samples, so it costs almost no CPU per frame and no sample assets at all. The natural fit for music, and
@@ -738,6 +836,36 @@ sequencer stays byte-exact against the ROM, and only the translation is new.
   the hardware is the only listener.
 - Silence the SIDs when paused and on every exit, and start them again on the way back from a pause.
 
+### 8.5 Music on the SAM2695 (`src/snd.a` in Texas Shitkickers, the worked example)
+
+An original game has no samples to keep and no chip to emulate, so the cheapest source of music there is is
+the General MIDI synth: the 6809 sends notes, a few bytes a frame, and the chip does the rest.
+
+- **The path: the MIDI FIFO at `$FF30`, written directly** — another fixed-decode absolute-I/O exception, like
+  the VS1053. Its bytes feed the SAM2695. Check the FIFO's fill before writing (leave it a margin), and collect a
+  frame's messages into one buffer flushed once a frame: MIDI's 31,250 baud carries about 52 bytes a frame, so a
+  frame that sends more is spilling into the next. The OS's `/mi` device is the alternative path; it isn't in
+  the Level 2 boot, so Texas Shitkickers keeps it behind a build switch, unused.
+- **Songs are MIDI files, converted on the host to one 8K block a song**: records of (wait in frames, length,
+  MIDI bytes), running status kept, a loop point and an end taken from MIDI marker events. Any DAW's `.mid`
+  works; Texas Shitkickers composes its songs as Python that writes MIDI, so they live in the repo as source.
+  **Pin the song numbers** in the converter (a new song goes on the end) so a new song never renumbers the old.
+- **One sequencer, one song at a time**, looping or once; a song that ends falls silent rather than wrapping
+  into garbage. A song is played from its block through the kept window (section 3), which is what caps a song
+  at 7,424 bytes.
+- **Sound effects share the synth**: short lists of (delay, status, note, velocity, length), mostly drum-kit
+  notes on channel 10 alongside the music's drums, a few on channels the songs leave free (a tuba sag with a
+  pitch bend, tubular bells, a train whistle as a chord). Note-offs and delayed notes wait in a small queue
+  ticked each frame. A missing effect-table entry plays garbage: Texas Shitkickers once sent hundreds of junk
+  messages from an unset entry, which cost 250K cycles in one pass.
+- **Listen on the host.** Render the same MIDI through fluidsynth and a GM soundfont to MP3: the browser
+  prototype plays those files, so both versions play the same notes (the voices differ, the notes don't). Prove
+  the sequencer on the host model by comparing every note it sends against a reference player, through the
+  loop; capture what the program sends (a Lua tap on the FIFO's data port in MAME, or the host model's writes)
+  back into a `.mid` to listen to.
+- **The Wildbits MAME doesn't voice the SAM2695 itself**, but its MIDI output can be sent to fluidsynth as a
+  decoder (`rlucente-retro/mame`'s README has the set-up). Without that, the hardware is the only listener.
+
 ## 9. Input
 
 - **Joysticks:** `SS.Joy $13`, fixed in this project. R$X = joystick # (0 = header 0 = VIA0 port B,
@@ -754,6 +882,9 @@ sequencer stays byte-exact against the ROM, and only the translation is new.
   plugged in, the first reading is empty, and an absent pad or an NES pad read in SNES mode shows buttons
   held. Tempest skips the first reading and takes the pad only after it has once read all-zero, at rest.
   *(Tempest's pad support is untested on a real pad: the bit order is read from the RTL.)*
+- **Design for two buttons and a shortcut.** A stick gives one button, a SNES pad three, the keyboard as many
+  as you like. Texas Shitkickers has jump and kick, with its third move as a combination (back + kick is the
+  side kick) and a key (C) as a shortcut for it, so the game is whole on two buttons.
 - **A call costs ~400-500 µs (8 MHz), so read a device only once it has been used.** Tempest looks at the stick
   every 30 passes until it has shown a direction or a button, then every pass; that halved its GetStat
   calls and the time went back to the drawing.
@@ -820,6 +951,11 @@ program people can use.
   the game cannot be itself without them; a VS1053 that does not answer leaves `SNDON` clear and the game
   **runs silent**. Both are better than a hang, and the difference is a judgement someone has to make
   deliberately rather than discover on the hardware.
+- **Ship it the way it's installed.** A release zip holds the module as `CMDS/<game>` and the data as
+  `<GAME>/` — not `<game>` and `<GAME>/` side by side, which are the same name on a case-insensitive disk
+  (macOS's default, Windows'): a player reported the zip wouldn't unpack. Add a README with the install
+  commands (a zip can't carry OS-9's execute attributes, so `attr ... e pe` for every module) and a ToolShed
+  script for people who install onto a disk image. Say how much memory it needs.
 - **A program that owns the screen owns the user's way out.** One documented quit key, and it must work
   from every state the game can be in — including paused, including mid-attract. Check it after every
   change to the input path.
@@ -897,6 +1033,13 @@ Everything the game logic asks for during the pass goes into a **per-frame pool 
 applied at the commit. Keep the pool sequential and contiguous: Joust's transporter effect walks
 *backwards* over three consecutive records, which only works because they come from one pool in order.
 A full pool handing back a scratch record is a real edge case — decide what it does before it happens.
+
+**One pass a tick held for a sprite game.** Texas Shitkickers never needed the SOL clock: its worst pass,
+counted on the host model, stayed under the tick through seven stages. What kept it there was **spreading the
+rare heavy work over passes instead of doing it when it happens**: a boss's KO takes his gang down one a pass;
+HUD text goes in five letters a pass after a pass that only clears the strip; a popup's digits are drawn on the
+pass after the hit; particles are handed out round-robin and give up at once when the table is full. Each
+of those was a worst pass found by the host model's per-pass cycle report, not by guessing.
 
 ### 12.1 How much of the display to send each frame
 
@@ -998,9 +1141,10 @@ what they bought Tempest:
 - **The hardware is the test.** The Wildbits MAME (`wbjr2`) emulates less than the machine, and what it
   covers changes with its build. **Since `b039bf09968` (2026-10-11) it models `Longview_rc24`, the new memory
   map (section 3), and the Jr2 only**: a Level 2 image built from upstream main (plus the pending bootfile-limit
-  change) boots to the shell in it; no game has
-  been run in it yet, so what follows about rendering is from the old-map build and is unchecked on this
-  one. An old-map image needs the old build. The build of **2026-09-30 (commit `8779b61`, the v8_rc20 baseline)**
+  change) boots to the shell in it, and **Texas Shitkickers ran in it throughout its development**
+  (2026-10-12 to 10-20): sprites, three scrolling tile layers, CLUT fades and a full-screen bitmap all render
+  as the K2 shows them. **It starts RAM at zero**, which the machine does not: an uncleared or unloaded sprite
+  cell is invisible in MAME and a square of noise on the hardware (section 6). An old-map image needs the old build. The build of **2026-09-30 (commit `8779b61`, the v8_rc20 baseline)**
   renders the **bitmap, tile map and sprite layers** with their CLUTs (tile-map attributes as section 6
   has them, from `028632e`), the MemText text engine, **draws with the line engine**
   (Tempest's rating-screen wells appear), returns the live raster row at `$FFDA/$FFDB`, and has the
@@ -1100,6 +1244,16 @@ what they bought Tempest:
   - **Its costs are guesses and they were wrong both ways** — the K2 drew faster than the model charged,
     and `F$MapBlk` cost far more. Use the model to rank changes and prove correctness; take the numbers
     from the hardware.
+- **Put test levers on the command line.** Texas Shitkickers takes letters after its name: `b` an autopilot
+  plays (the same input bits a player makes, so it exercises the real game), `g` nothing hurts the hero, `k`
+  straight to the stage's boss, a letter for each stage, `f` any hit kills (the death scene), `s` extra lives.
+  Combined (`tsk mkbg`: the autopilot against Main Street's boss, unhurtable) they reach any part of the game in
+  seconds, in MAME, on the host model and on the machine, and the attract mode is the autopilot for free.
+- **Write the checks the hardware punishes silently as host-model scripts, and run them on every stage.**
+  Texas Shitkickers' are small wrappers over its host runner: every pass's display list (no stray frame, none
+  past the table); every frame drawn belongs to the loaded stage's bank (the noise of section 6); and, in the
+  build, every direct-page operand is a direct-page variable (a rename once turned one into a code label and
+  the whip's hit box wrote over a random variable).
 - **Reproduce intermittent faults with a harness that forces the rare path.** Tempest's "slows down after
   a few games" survived seven simulated minutes of back-to-back games in the model; the same harness with
   the high-score table zeroed — so every game ended in initials and the start ladder — reproduced it at
@@ -1217,7 +1371,13 @@ engine plausibly right. **When two sources disagree, say so in the doc and mark 
 - **An 8-bit indexed offset is signed**: a static field above `$7F` needs the 16-bit form
   (`ldb V.WSigID,u` will not assemble as written).
 - A far label used in direct mode is truncated to page 0 silently — give the static checker a class for it.
-- **A new `src/*.a` must be added to the makefile's `SOURCES`** or make silently reuses the old listings.
+- **A new `src/*.a` must be added to the makefile's `SOURCES`** or make silently reuses the old listings — and
+  reports "nothing to be done", so a host-model run then tests the previous build. It bit again in Texas
+  Shitkickers.
+- **`ldd #x` followed by `lda` or `ldb` overwrites half of D.** Found three times in one project, each time as a
+  frame number half-overwritten (the wrong sprite drawn).
+- **A loop whose body calls shared routines keeps its counter on the stack or in a variable of its own.** The
+  shared scratch variables get reused by the routines it calls; the loop then runs 256 times, or never ends.
 - `grep` fails silently on very large source files in this sandbox (it exits 1 and prints nothing past
   ~line 6,600, even through a pipe). Use `awk`, and note `NR` is cumulative across files — use `FNR`.
 - Some tools refuse `.a` files as binary; read them with `sed`/`awk` and edit them with scripts.
@@ -1247,6 +1407,7 @@ worked example.
 
 | Question | Why it decides something |
 |---|---|
+| Is there an original at all? | A new game has no listing and no ROM to check against: design it in a browser under the F256's rules and port that (section 14b) |
 | What CPU is the source? | 6809 is a transcription with the arcade labels intact; anything else is a translation, and the per-routine checking that replaces "compare against the listing" has to be planned: section 14a |
 | What does the display *actually* consist of? | Moving objects → sprites; static background → tile map; text, effects and anything hand-plotted → bitmaps; lines → the line engine (section 7). Most games are a mixture, and the mixture is the design |
 | Does it redraw the screen wholesale each frame? | If yes, erasing is a first-class problem with no free answer at 76,800 bytes a frame — settle it before anything else: a DMA clear of a double-buffered bitmap, armed a tick ahead (section 6a) |
@@ -1259,7 +1420,8 @@ worked example.
 | What makes the sound? | Samples → VS1053 (section 8); a synth voice model → the SIDs, PSGs or OPL3 behind a register image (section 8.4). Log the original's chip writes before deciding. Decide before the output stage exists |
 | What maths does the frame do? | Multiplies and divides can go to the integer coprocessor (section 7a) instead of being hand-written |
 | Where do settings and high scores live? | The settings-as-a-file model answers EAROM, CMOS and battery RAM alike, with an operator program editing the same file |
-| How big is the kept code and data? | Against 40,192 bytes of module and one 8K data area (section 3). Measure it early; relief is moving tables into asset blocks |
+| How big is the kept code and data? | Against 40,192 bytes of module and one 8K data area (section 3). Measure it early; relief is moving tables into asset blocks, and past that, stage modules (section 3a) |
+| How much art, and can it all be loaded at once? | Count sprite cells with their mirrored copies (section 6). Texas Shitkickers' art is ~4.4 MB on disk against ~1.8 MB of RAM: only stage banks make it fit |
 
 **Graphics first. The order is not arbitrary, and it is the single best procedural lesson of the Joust
 port.** (Tempest's version of the viewer was host-side: its display was proven by rendering MAME's captured
@@ -1323,6 +1485,14 @@ precisely *because* you cannot see it.
   output stage in `src/sound.a`, the pad guard in `src/input.a`, the DMA clear in `src/gfx.a`, and the
   stock-MAME Lua capture scripts (`tools/avgcap.lua`, `tools/sndref.lua`).
 
+- From Texas Shitkickers: the browser-to-F256 exporter (`game/js/export.js` + `f256/tools/export.py`: cells,
+  frame records, groups and stage banks, split palettes, shades, previews rebuilt from the binaries); stage
+  modules and their generated glue (`src/stgmod.a`, `tools/stagegen.py`); the depth-sorted display list and
+  frame records (`src/draw.a`); text and bars in dynamic sprite cells (`src/hud.a`); the SAM2695 sequencer and
+  effects (`src/snd.a`, `tools/midi2tsk.py`, `tools/compose.py`, `tools/render.py`); the host runner and its
+  checks (`tools/hostrun.py`, `dlcheck.py`, `bankchk.py`, `dpcheck.py`); the MAME and release scripts
+  (`tools/mame.sh`, `make dist`). `f256/ARCHITECTURE.md` is the tour.
+
 ## 14a. When the original is not a 6809: translating, with the ROM as the oracle
 
 Tempest's 6502 was translated, not transcribed, and "compare against the listing" had to be rebuilt as
@@ -1372,6 +1542,39 @@ does not recognise.
 register writes, per-frame work — all with MAME unmodified. Those captures are the reference for the
 display, the sound and the timing, as well as the logic.
 
+## 14b. When there is no original: design it in a browser first
+
+Texas Shitkickers had no arcade listing and no ROM, so "compare against the original" needed a substitute. It
+was a **browser prototype held to the F256's rules**, and it became three things at once: the design tool, the
+reference for every number, and the source of every asset.
+
+1. **Write the rules into the prototype before any art.** Three layers of 16×16 tiles, 32×32 sprite cells,
+   four CLUTs with entry 0 transparent, no flip, rotate or blend (sections 6 and 14's survey). Draw art at 1:1
+   with shapes and then **snap every pixel to a tracked palette** (threshold the alpha, map each colour to its
+   CLUT's entry): it reads as hand-placed pixel art, stays posable from code, and uses only colours the machine
+   will have. A sprite-sheet view that cuts every frame into cells and counts the unique ones is the sprite
+   memory budget, visible while designing.
+2. **Play it until the design settles, then port.** A change to a jump arc or a boss pattern is a reload in the
+   browser and an assemble, install and reboot on the machine. Every mechanic, every boss, the music and the
+   cutscenes were tried and judged by playing the prototype first, and only what survived was translated.
+   Give it the same test levers as the program (an autopilot, invulnerability, start anywhere: section 13), and
+   drive it headless (Chromium with a `requestAnimationFrame` shim; dump the canvas and a state object) for
+   checks.
+3. **Export, never redraw** (section 2). The prototype draws the art; a headless run of it writes the binaries
+   and the defs file; the previews rebuilt from the binaries prove the formats (section 14's viewer, which this
+   project wrote too: it ran on the K2 before any game code).
+4. **Translate the behaviour by hand, one system at a time**, with the prototype's constants converted
+   (per-second values become per-tick 12.4 fixed point) and the prototype open beside the code. Check each
+   system on the host model against the prototype's numbers, then in MAME, then on the machine. **The port
+   finds the prototype's bugs**: a jump press that also stomped, one tap queuing two kicks, a mid-air hit that
+   froze the hero's height. Fix them on both sides.
+5. **Keep the two in step for the rest of the project.** New features go in the browser first, are played,
+   then ported; a table both sides need (the bosses' lines) lives where both read it, so they can't drift.
+
+What this cost, honestly: the game exists twice, and every feature is written twice. What it bought: the
+design was settled by playing, not by reasoning, and the 6809 side never had to discover what the game was
+meant to do.
+
 ---
 
 ## Appendix: the one-page checklist
@@ -1386,6 +1589,9 @@ display, the sound and the timing, as well as the logic.
       mutations
 - [ ] Anti-tamper and hardware-probe code found and made to pass
 - [ ] A host model of the machine that checks the display every frame
+- [ ] No original: a browser prototype held to the F256's rules, played until the design settles (14b)
+- [ ] Sprite memory counted with the mirrored frames; stage banks if the art won't all fit (6)
+- [ ] Everything allocated at start-up, and a message that says how much is needed when it fails (3)
 
 **Before believing the sound works**
 - [ ] Metered feed, not FIFO top-up; latency judged by ear against an event
@@ -1404,6 +1610,8 @@ display, the sound and the timing, as well as the logic.
 - [ ] Run in the Wildbits MAME: start, coin, start, quit, the sign-off (and know which core that MAME models)
 - [ ] Every register each driver call returns saved where needed, and modelled on the host
 - [ ] The diagnostic build and a fixed benchmark if the run is meant to measure anything
+- [ ] Every frame drawn belongs to a loaded bank, and every allocated block was cleared or loaded (MAME starts
+      RAM at zero and won't show it)
 
 **Before writing a doc line**
 - [ ] Measured, or labelled untested
