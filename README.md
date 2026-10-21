@@ -9,7 +9,13 @@ Read it as: **sections 1-3** before deciding anything, **4-7b** while designing 
 **13** before every hardware run. **Section 14 is how to start a new port** — the survey each game needs,
 which goes in its own companion file — **14a is the method when the original's CPU is not a 6809**, and
 **14b is the method when there is no original at all**: a new game, designed first in a browser. **Section 3a**
-is what to do when a program outgrows the module budget.
+is what to do when a program outgrows the module budget, and **section 15 is how to work on all of this with
+Claude**.
+
+**Starting a project? Copy [`starter/`](starter/)**: the smallest complete F256 program (graphics memory, a CLUT, a
+scrolling tile map, a sprite, held keys, a note, the pause and the clean exit, about 1.3K of 6809, checked in
+MAME), with a makefile, an art generator and a MAME script. And copy [`CLAUDE-template.md`](CLAUDE-template.md) to
+the new project as `CLAUDE.md`.
 
 **Per-game companions** (this guide stays generic; nothing game-specific belongs in it):
 
@@ -1591,6 +1597,8 @@ precisely *because* you cannot see it.
 
 **So, in this order**
 
+0. **Copy `starter/`** (this repo) for the skeleton every step below grows from: allocation, loading, the
+   display, the frame loop, input, sound, the pause and the clean exit are already there and run.
 1. **Convert the assets on the host and display them with a standalone viewer.** No game logic, no
    platform layer — load and show. Confirm against photographs of the real machine.
 2. **Bring-up harnesses for every remaining hardware primitive the design will lean on that this project
@@ -1717,11 +1725,65 @@ What this cost, honestly: the game exists twice, and every feature is written tw
 design was settled by playing, not by reasoning, and the 6809 side never had to discover what the game was
 meant to do.
 
+## 15. Working with Claude on a port
+
+All three projects behind this guide were built by a person and Claude together: the person decides, plays and
+runs the hardware; Claude writes most of the code, the tools and the docs. What made that work, and what went
+wrong when it didn't:
+
+**Set it up on day one**
+
+- **A `CLAUDE.md` at the project root** (start from `CLAUDE-template.md`): where the handoff is, where this guide
+  is, the machines and the core, how to build and test, what needs asking first, and where decisions are
+  recorded. It's read at the start of every session, so keep it short and current.
+- **`docs/status.md` is the handoff** (section 2). Sessions end and context is lost; the doc is what survives.
+  Ask for it to be updated at the end of every piece of work, with what was run on which machine.
+- **Decisions in one place, dated** (Texas Shitkickers' `story.md`; Joust's and Tempest's `status.md`). Claude
+  should record a decision when it's made and not reopen it later.
+- **A tracker for the person's jobs**, if you use one: a hardware run, a playtest, a judgement call. Claude can't
+  run the K2 or hear the speaker, so those are the tasks that wait on the person, and they should be written
+  down where both can see them.
+
+**Divide the work by who can see what**
+
+- Claude can build, run the host model and MAME, read the RTL, and look at screenshots; it can't run the
+  hardware, hear the sound or judge the feel. **The person is the hardware tester and the player**: one change per
+  hardware run (section 13), a photograph or a screenshot when something's wrong, and a judgement in plain words
+  ("the doors disappear when they're not destroyed", "a shade too long").
+- **Give it the evidence, not the theory.** Two screenshots of High Noon's noise pointed straight at a sprite
+  drawn from the wrong bank; a description alone would have sent it looking in the wrong place.
+- **Let it build the instruments.** The host model, the display-list and bank checks, the MAME scripts and the
+  numbers sign-off were all Claude's, and they found most of the bugs before the hardware saw them.
+
+**Failure modes to watch for, and the guardrails that worked**
+
+- **A confident wrong diagnosis.** It will explain a fault fluently and be wrong. Insist on evidence before a
+  fix is called a fix: a host-model run, a MAME snapshot, the hardware. "Fixed" means shown, and the docs must
+  never record an untested diagnosis as confirmed (section 13).
+- **Trusting MAME too far.** MAME starts RAM at zero, has its own timing and is silent on the SAM2695. A clean
+  MAME run is "it starts, draws and exits", nothing more.
+- **Edits that didn't land.** A scripted edit whose anchor no longer matches can fail silently, and a build that
+  says "nothing to be done" can be testing yesterday's module (section 13's potholes). Ask it to assert its
+  matches and check that the build actually rebuilt.
+- **Misreading a request.** "I like that" once read as a request to change something that was meant as approval,
+  and a feature started that nobody asked for. When a message is ambiguous, it should ask; when it misreads, say
+  so plainly and it should revert.
+- **Scope.** It will offer more than was asked. That's useful as suggestions and costly as unrequested work: the
+  person decides what's built, and "add it as a task for later" is a fine answer.
+- **Outward actions.** Pushing, opening a PR, publishing, deleting: it should ask first unless told otherwise in
+  `CLAUDE.md`, and confirm what's going where.
+
+**A rhythm that worked** (Texas Shitkickers, about ten days from nothing to a seven-stage game on the K2):
+design in the browser and play it → port one system → host model → MAME → the person's hardware run → fix →
+commit and push → a line in the handoff. Small steps, each one proven before the next, and the person's
+judgement on every design question.
+
 ---
 
 ## Appendix: the one-page checklist
 
 **Before designing**
+- [ ] `starter/` copied, building and running in MAME; `CLAUDE.md` filled in from the template (15)
 - [ ] Assets converted and shown on real hardware by a standalone viewer, checked against photographs
 - [ ] Both seams written down, with every call site listed
 - [ ] Every hardware primitive the design depends on proven on real hardware by a harness
