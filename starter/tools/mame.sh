@@ -17,6 +17,7 @@ cp "$IMAGE" "$WORK/starter.dsk"
 truncate -s 134217728 "$WORK/starter.dsk"      # MAME's SD sizes: odd x 2^n blocks. Pad UP only (guide section 13)
 make -C "$HERE" -s install DSK="$WORK/starter.dsk" >/dev/null
 cd "$MAMEDIR"
-./mame wbjr2 -rompath "$ROMS" -bios turbo -hard "$WORK/starter.dsk" -skip_gameinfo -video none -sound none -nothrottle \
+SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy ./mame wbjr2 -rompath "$ROMS" -bios turbo -hard "$WORK/starter.dsk" -skip_gameinfo -video none -sound none -nothrottle \
+  -keyboardprovider none -mouseprovider none -joystickprovider none -lightgunprovider none \
   -autoboot_script "$HERE/tools/starter.lua" -snapshot_directory "$WORK/snap" 2>&1 | grep -v "NO GOOD DUMP\|^$" | tail -3 || true
 ls "$WORK/snap/wbjr2/" 2>/dev/null

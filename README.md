@@ -1395,9 +1395,19 @@ what they bought Tempest:
 
 - **Headless and scripted**, the form for checks before a hardware run:
 
+      SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
       $MAMEDIR/mame wbjr2 -rompath $F256_ROMS -bios turbo -hard /path/to/copy.dsk -skip_gameinfo \
           -video none -sound none -nothrottle \
+          -keyboardprovider none -mouseprovider none -joystickprovider none -lightgunprovider none \
           -autoboot_script drive.lua -snapshot_directory snap
+
+  **Keep a headless MAME off the desktop and away from the host's keyboard and mouse.** `-video none` alone
+  still opens an empty SDL window, and it takes the keyboard and mouse focus; the two `SDL_*=dummy` variables stop
+  that. Without the four `-…provider none` options, keys typed on the host reach the emulated machine and corrupt
+  the test's input. Lua autoboot scripts still work with all of this, since they drive the machine's own ports
+  (`natkeyboard:post`, ioport fields, `screen:pixel`). To check that no window opens, run
+  `xwininfo -root -tree | grep -i mame` while it runs: it should find nothing. (Checked 2026-10-21 with the
+  starter: no window, the scripted keys arrived, snapshots taken; `starter/tools/mame.sh` uses this form.)
 
   Snapshots still work with `-video none`. MAME prints the kernel's last state (LUT, `D.Proc`, the code at
   PC) on exit; that is normal. With `-autoboot_command` instead of a script, a newline is the
