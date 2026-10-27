@@ -1075,9 +1075,9 @@ the General MIDI synth: the 6809 sends notes, a few bytes a frame, and the chip 
   every 30 passes until it has shown a direction or a button, then every pass; that halved its GetStat
   calls and the time went back to the drawing.
 - **Modifier/arrow keys and ordinary keys held:** `SS.LiveKeys $C6` returns the driver's live `D.KySns`
-  bits in R$A — Shift, Ctrl, Alt, four arrows, space (bit 7 set on the Jr2 and never on the K2: a latent
-  driver inconsistency, do not design against it — confirmed again with `starter/` on a K2, 2026-10-21: Z played its
-  note, space didn't; give every action a letter key) — and up to six ordinary key codes held down in
+  bits in R$A — Shift, Ctrl, Alt, four arrows, space (bit 7, on both machines since NitrOS-9 PR #470,
+  2026-10-27: until then the K2 driver never set it, and the advice here was to give every action a letter
+  key; on an older K2 build that is still the safe choice) — and up to six ordinary key codes held down in
   R$X/R$Y/R$U, no caller buffer. (The key codes were once a separate call, `SS.KyDwn $D0`; that code is now
   free.) This exists because NitrOS-9 has nothing else that reports a non-modifier key as *held*: the press
   makes a character and the release is computed and thrown away.

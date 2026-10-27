@@ -11,8 +11,8 @@ make install DSK=/abs/x.dsk   # CMDS/starter and /STARTER/*.bin on a disk image 
 make mame                     # install onto a copy of the image and run it in the Wildbits MAME, with snapshots
 ```
 
-On the machine: `chd /dd/STARTER`, then `starter`. Arrows move the ball, Z plays a note (space too, on a Jr2 only: the K2's
-driver never sets the space bit, guide section 9), Q quits.
+On the machine: `chd /dd/STARTER`, then `starter`. Arrows move the ball, Z or space plays a note (space on the K2 needs a
+NitrOS-9 build from 2026-10-27 on, guide section 9), Q quits.
 
 First tell it where things are on your machine: copy `../env.sh.example` to `../env.sh`, fill it in, and
 `. ../env.sh` (the guide's "Your machine": `NITROS9DIR`, `LWASM`, and for `make mame` `MAMEDIR`, `F256_ROMS`,

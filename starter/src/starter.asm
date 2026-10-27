@@ -17,8 +17,8 @@
 *     exit on every path - Q, a signal, an error - that switches off what
 *     VICKY reads BEFORE freeing it (sections 6 and 10)
 *
-* Keys: arrows move the ball, Z plays a note (space too, but only on a Jr2:
-* the K2's driver never sets the space bit, guide section 9), Q quits.
+* Keys: arrows move the ball, Z or space plays a note (space on a K2 needs
+* a NitrOS-9 build from 2026-10-27 on, guide section 9), Q quits.
 * Run it from its asset directory: chd /dd/STARTER ; starter
 *
 * Grow it into a game by replacing Update (what happens each frame) and the
@@ -46,8 +46,8 @@ NSprBlk             equ       (SPR.Size+$1FFF)/$2000
 NRecs               equ       1                   sprite records we own (up to 128)
 CamMax              equ       MAP.W*16-320        the camera's right-hand stop
 
-* SS.LiveKeys sense bits (the arrows; the space bit is set on a Jr2 and never
-*   on a K2, so every action needs a letter key too)
+* SS.LiveKeys sense bits (the arrows and space; the K2 sets the space bit
+*   only from NitrOS-9 PR #470, 2026-10-27, so Z works on older builds too)
 KY.Up               equ       %00001000
 KY.Down             equ       %00010000
 KY.Left             equ       %00100000
