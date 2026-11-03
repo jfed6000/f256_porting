@@ -51,6 +51,7 @@ your profile). Then the commands below run as written, and the starter's makefil
 | Variable | What it points at |
 |---|---|
 | `$NITROS9DIR` | the NitrOS-9 source tree (`nitros9project/nitros9`, main): its `defs`, drivers and recipes (`$NITROS9DIR/recipes/wildbits/l2`) |
+| `$NITROS9GPU` | a read-only clone of the same repo's unmerged branch `wb/flightsim2`, which has the GPU call `SS.Gpu` (section 7b.4); needed only for GPU work until it merges |
 | `$LWASM` | the assembler (LWTOOLS' `lwasm`) |
 | `$MAMEDIR` | your build of the Wildbits MAME (`github.com/rlucente-retro/mame`); the binary is `$MAMEDIR/mame` |
 | `$F256_ROMS` | the ROM files that MAME's `wbjr2` machine needs (its `-rompath`) |
@@ -371,6 +372,7 @@ The calls the projects added (the ones used: **J** Joust, **T** Tempest, **K** T
 | `$D3` | `SS.SprReg` | Set | register this terminal's sprite table, or give it up | J K |
 | `$D4` | `SS.GfxAlloc` | Set | N consecutive RAM blocks, owned by the program (section 3) | K |
 | `$D5` | `SS.GfxFree` | Set | give them back; refuses a driver-owned bitmap's blocks | K |
+| `$D6` | `SS.Gpu` | Get/Set | the GPU and any physical block through the driver: pokes, uploads, records, SceneEngine, point port (section 7b.4). **Branch `wb/flightsim2` only, not main** | — |
 | `$E3` | `SS.BmAlloc` | Set | allocate a bitmap and define it; the driver owns the blocks | — |
 | `$E4` | `SS.BmBlk` | Get | a bitmap's first block and control byte | J T |
 | `$E5` | `SS.BmClear` | Set | fill a bitmap on the DMA engine, asynchronously (section 6a) | T |
@@ -399,7 +401,7 @@ Everything else in the code space is reserved and returns `E$UnkSvc`. `$D0` is f
 folded into `SS.LiveKeys`) and is the approved code for `SS.MsDelta`, mouse motion as counts, which is not
 in the driver yet (Tempest asks for it and runs without). **Reserved names without handlers:**
 `SS.ClutLoad`/`ClutCopy`/`ClutRead` `$CC-$CE`, `SS.TsAlloc` `$F0`, `SS.TsKill` `$F3`, `SS.TmAlloc` `$F6`,
-`SS.TmKill` `$FD`. **Spare:** `$D6-$E0` (the per-sprite codes the registered table made unnecessary; the GPU manual gives `$D6` to an `SS.Gpu` call, unverified, not upstream, and possibly to be an `F$` call instead: section 7b.4),
+`SS.TmKill` `$FD`. **Spare:** `$D6-$E0` (the per-sprite codes the registered table made unnecessary; `$D6` is now `SS.Gpu`, on the unmerged `wb/flightsim2` branch: section 7b.4),
 `$E9`, `$EB`, `$EC`, `$EF`, `$F1`, `$F2`, `$F5`, `$F7`, `$F9-$FC`, `$FE`, `$FF`. Codes are a driver's own, so the
 same number can mean something else on another device; the ones other Wildbits drivers use in this range are
 `$C7-$CB` VRN (so `SS.MsCfg` shares `$C7` with VRN, on a different path), `$D2` sc16550's `SS.DvrID`, `$E2`
@@ -894,30 +896,34 @@ no interrupt; poll or use markers.
 - **The point port is fixed I/O,** like the DMA and the coprocessor (section 7a): an absolute-address
   exception, global and unarbitrated, so the same cautions apply — mask interrupts around a sequence if
   anything else might use it, and make the host model fail an unmasked access.
-- **The renderer and the SceneEngine are in the VICKY page,** which grfdrv256 owns. **The manual documents a
-  grfdrv256 call for them, `SS.Gpu` (`$D6`)**, and its examples use nothing else. **Unverified: the manual is the only
-  source, and the route itself is in question** (2026-11-03): GPU access may come instead as a new `F$` system
-  call, not a grfdrv256 status call at all. Upstream NitrOS-9 main has neither (checked at `226d0cc5`), and no tree
-  on this machine does, so there is nothing to check the manual against. Don't write code against any of it until
-  the real interface is confirmed and its source is in hand; then document it here (and in section 6's table if it
-  is a grfdrv256 call). The functions are likely to survive whichever route it takes, since they are what the
-  hardware needs. As the manual gives them: A = path, X high byte = the function, X low byte = a block, flags or command; protect U, which most
-  functions use. Set and Get are `I$SetStt` / `I$GetStt`.
+- **The renderer and the SceneEngine are in the VICKY page,** which grfdrv256 owns, and **grfdrv256 reaches them
+  for a program through one call, `SS.Gpu` (`$D6`)** — a status call on the terminal's path, not an `F$` system
+  call. **It is on NitrOS-9's unmerged branch `wb/flightsim2`, not on main** (read at `1ac32ccd`, 2026-11-02; that
+  branch touches neither the kernel nor `os9.d`): `defs/wildbits.d` has the equates and the long comment that is
+  the call's specification, and `grfdrv256.asm` the handlers (`SSGpu`/`GSGpu`). Keep a read-only clone of the
+  branch as `$NITROS9GPU` (section "Your machine"), assemble GPU code against its `defs`, and boot an image with
+  its grfdrv256. Until it merges, `$NITROS9DIR`'s grfdrv256 answers `$D6` with `E$UnkSvc`. A = path, X high byte =
+  the function, X low byte = a block, flags or command; Y and U as below, so protect U. SetStat writes, GetStat
+  reads; the wrong one of a one-way function is `E$UnkSvc`, and so is every K2-only function on the Jr2.
 
-  | Fn | Name | Does |
+  | Fn | `GpuF.` | Does |
   |---|---|---|
-  | 0, 1 | `LPk8`, `LPk16` | read or write one byte or word in a physical block (XL) at offset Y |
-  | 2 | `LPkN` | write U bytes (1-`$1FFC`) at offset + (i AND mask): **mask 0 sends every byte to one register, which is how `UP_DATA` uploads go**. Not queue-checked: batch it within `FIFO_FREE` |
-  | 3, 5 | `Scene`, `SceneL` | upload SceneEngine memory from a buffer, or from a list of ranges |
-  | 4 | `Rec` | push 1-1,024 8-byte units; the driver checks queue room per unit. XL b0 = convert old 240-row LINE records for 480 rows, b1 = wait for the SceneEngine to be idle first |
-  | 6 | `SeOut` | drain the SceneEngine's output into a buffer, optionally with GO, GO-AT or RESUME first; repeat while busy |
-  | 7 | `FixN` | write 1-32 bytes to the fixed VICKY registers (`$FFC0-$FFDF`) or 1-8 to the point port |
-  | 8 | `Pp` | run a list of point-port transactions; the results replace the input |
-  | 9 | `List` | up to 255 seven-byte items of set, get or wait (for a raster line, or for queue room); no nesting |
+  | 0, 1 | `LPk8`, `LPk16` | read or write a byte or a word (high byte first) in any physical block (XL) at offset Y, the driver mapping it. **A write to a GPU register (`VICKY_BLK:$1800-$187F`) first waits for room for two units in the queue**; a write of `GPU_CTRL` with RESET goes straight in and then waits until the GPU is idle |
+  | 2 | `LPkN` | a run of 1-`$1FFC` bytes from a request (offset word, mask, 0, the bytes): byte i goes to offset + (i AND mask). Mask 0 feeds one register (a FIFO: **`UP_DATA` uploads go this way**), 1 a word register, 7 an 8-byte window (the record window), `$FF` 256 straight bytes. **It does not check the GPU's queue**: batch an upload within `FIFO_FREE` |
+  | 3, 5 | `Scene`, `SceneL` | K2, Set: copy a buffer, or a list of ranges, into SceneEngine RAM **at the buffer's own address** (the engine's RAM mirrors the program's map: variables `$0000-$1FFF`, scene `$4000-$7FFF`); the engine must be idle |
+  | 4 | `Rec` | K2, Set: 1-1,024 8-byte units to the record window, **each after room for it in the queue**. XL flags: `GpuRec.480` (b0) widens 240-row LINE records for the 480-row view; `GpuRec.SeIdle` (b1) waits for the SceneEngine to stop first (its adapter shares the queue) |
+  | 6 | `SeOut` | K2, Get: up to `$1000` of the SceneEngine's OUT words into a buffer, after an optional command (XL: 0 none, 1 GO, 2 GO-AT, 3 RESUME); returns U = words read, X = its STATUS. Call again while it runs |
+  | 7 | `FixN` | as `LPkN`, to fixed registers: XL 0 VICKY's at `$FFC0-$FFDF` (border, background, mode, the raster line), XL 1 the point port's at `$FED8-$FEDF` |
+  | 8 | `Pp` | K2, Get: point-port transactions, each a command (0 none), the port (0 G, 2 P, 4 Q), words in, words out, then the words, the results read back over them |
+  | 9 | `List` | 1-255 seven-byte items (kind, then X, Y, U as the call takes them) run in order in one call: `GpuK.Set`, `GpuK.Get`, `GpuK.Wait` (`GpuW.Ras` a raster line, `GpuW.Free` `FIFO_FREE` at least Y), `GpuK.None`. The first failure stops it: carry, B, U = the item's number. No list in a list |
 
-  Without it, a program would map `VICKY_BLK` itself (by symbol, never by number) and own the terminal-switch
-  question; its register writes should follow the `V.TermLive` rule.
-- **Nothing saves the GPU's state on a terminal switch,** with or without `SS.Gpu`: the manual's examples assume
+  **Every wait in the driver is bounded**: 65,536 polls, then `E$DevBsy` (a poke that times out has written nothing; a `Rec` batch may have sent part of itself). **Why the waits
+  matter:** the core drops a unit that finds the queue full (the driver's comment, 2026-10-26) — the OVERFLOW bit is
+  all that says so — and drops units that arrive while it flushes after a RESET. A program writing records itself
+  must keep the same rules. **The call is first in both dispatch tables** ("a program calls it every frame"), and
+  one call's fixed cost is still the thing to design around (section 12.1): `Rec` with up to 1,024 units, and `List`
+  to fold a frame's other set-ups into the same call.
+- **Nothing saves the GPU's state on a terminal switch:** `SS.Gpu` is an access path, not a context; the manual's examples assume
   a fresh, live terminal and no other GPU owner, and check `GPU_ID`, enable and busy before taking it.
 - **Turning the GPU layer on:** `SS.Layer` (`$8E`) with X = the layer and Y = 3, and `SS.MCR` (`$8C`) with the
   graphics and bitmap bits on (Get it first and restore both bytes). There is no Get for `SS.Layer`, so restore
@@ -1943,7 +1949,7 @@ above (as of 2026-10-21). Anything on this list needs a harness and a hardware r
 | What | Where it's described | What's unknown |
 |---|---|---|
 | **Timings on the current core** | throughout (the note at the top) | most cost figures are from 8 MHz; the ~20 MHz machines need the key ones re-measured: a driver call, `SS.SprPush` per record, `F$MapBlk`, `SS.TmScrl` |
-| The GPU's three units (K2, rc26; documented to RC28) | 7b | everything: read from the GPU Programmer's Manual, never run here or by the manual's authors; mesh transform and upload rates; how a program reaches it under OS-9: the manual's `SS.Gpu` (`$D6`) or a new `F$` call; upstream has neither, and confirmation is pending |
+| The GPU's three units (K2, rc26; documented to RC28) | 7b | everything: read from the GPU Programmer's Manual, never run here or by the manual's authors; mesh transform and upload rates; `SS.Gpu` is on NitrOS-9's unmerged `wb/flightsim2` branch, not main, and used so far only by that branch's own Flight Simulator II work, never by a project here |
 | The OPL3 | 8 | write-only with no status; its write timing and a register shadow |
 | The PSGs as a sound source | 8 | unexercised beyond grfdrv256's own use |
 | PCM (rc25) | 8 | the CPU is the sample clock: what a frame loop can sustain |
