@@ -19,7 +19,7 @@ scrolling tile map, a sprite, held keys, a note, the pause and the clean exit, a
 MAME), with a makefile, an art generator and a MAME script. And copy [`CLAUDE-template.md`](CLAUDE-template.md) to
 the new project as `CLAUDE.md`.
 
-**Contents.** [1. The shape of the job](#1-the-shape-of-the-job) · [2. Project layout that worked](#2-project-layout-that-worked) · [3. Level 2 is the environment, and its limit is logical space](#3-level-2-is-the-environment-and-its-limit-is-logical-space) · [3a. When the program outgrows the module: stage modules](#3a-when-the-program-outgrows-the-module-stage-modules) · [4. Position-independent code](#4-position-independent-code) · [5. The data area and base-register convention](#5-the-data-area-and-base-register-convention) · [6. Graphics: let the hardware do it](#6-graphics-let-the-hardware-do-it) · [6a. The DMA engine](#6a-the-dma-engine-read-from-the-rtl-2026-09-18-used-by-tempest-through-ssbmclear) · [7. The hardware line-draw engine](#7-the-hardware-line-draw-engine-read-from-the-rtl-2026-09-18-tempest-draws-everything-with-it) · [7a. The other coprocessors](#7a-the-other-coprocessors) · [7b. The GPU](#7b-the-gpu-k2-from-rc26-read-from-the-hardware-reference-2026-10-20-not-yet-used-by-any-project) · [8. Sound](#8-sound) · [9. Input](#9-input) · [10. Being a good OS-9 citizen](#10-being-a-good-os-9-citizen) · [11. Driver work in the NitrOS-9 tree](#11-driver-work-in-the-nitros-9-tree) · [12. Frame architecture](#12-frame-architecture) · [13. Working method (the expensive lessons)](#13-working-method-the-expensive-lessons) · [14. Starting a project: the survey](#14-starting-a-project-the-survey) · [14a. When the original is not a 6809: translating, with the ROM as the oracle](#14a-when-the-original-is-not-a-6809-translating-with-the-rom-as-the-oracle) · [14b. When there is no original: design it in a browser first](#14b-when-there-is-no-original-design-it-in-a-browser-first) · [15. Working with Claude on a port](#15-working-with-claude-on-a-port) · [16. Not yet tried](#16-not-yet-tried) · [Appendix: the one-page checklist](#appendix-the-one-page-checklist)
+**Contents.** [1. The shape of the job](#1-the-shape-of-the-job) · [2. Project layout that worked](#2-project-layout-that-worked) · [3. Level 2 is the environment, and its limit is logical space](#3-level-2-is-the-environment-and-its-limit-is-logical-space) · [3a. When the program outgrows the module: stage modules](#3a-when-the-program-outgrows-the-module-stage-modules) · [4. Position-independent code](#4-position-independent-code) · [5. The data area and base-register convention](#5-the-data-area-and-base-register-convention) · [6. Graphics: let the hardware do it](#6-graphics-let-the-hardware-do-it) · [6a. The DMA engine](#6a-the-dma-engine-read-from-the-rtl-2026-09-18-used-by-tempest-through-ssbmclear) · [7. The hardware line-draw engine](#7-the-hardware-line-draw-engine-read-from-the-rtl-2026-09-18-tempest-draws-everything-with-it) · [7a. The other coprocessors](#7a-the-other-coprocessors) · [7b. The GPU](#7b-the-gpu-k2-from-rc26-from-the-gpu-programmers-manual-not-yet-used-by-any-project) · [8. Sound](#8-sound) · [9. Input](#9-input) · [10. Being a good OS-9 citizen](#10-being-a-good-os-9-citizen) · [11. Driver work in the NitrOS-9 tree](#11-driver-work-in-the-nitros-9-tree) · [12. Frame architecture](#12-frame-architecture) · [13. Working method (the expensive lessons)](#13-working-method-the-expensive-lessons) · [14. Starting a project: the survey](#14-starting-a-project-the-survey) · [14a. When the original is not a 6809: translating, with the ROM as the oracle](#14a-when-the-original-is-not-a-6809-translating-with-the-rom-as-the-oracle) · [14b. When there is no original: design it in a browser first](#14b-when-there-is-no-original-design-it-in-a-browser-first) · [15. Working with Claude on a port](#15-working-with-claude-on-a-port) · [16. Not yet tried](#16-not-yet-tried) · [Appendix: the one-page checklist](#appendix-the-one-page-checklist)
 
 **Per-game companions** (this guide stays generic; nothing game-specific belongs in it):
 
@@ -399,7 +399,7 @@ Everything else in the code space is reserved and returns `E$UnkSvc`. `$D0` is f
 folded into `SS.LiveKeys`) and is the approved code for `SS.MsDelta`, mouse motion as counts, which is not
 in the driver yet (Tempest asks for it and runs without). **Reserved names without handlers:**
 `SS.ClutLoad`/`ClutCopy`/`ClutRead` `$CC-$CE`, `SS.TsAlloc` `$F0`, `SS.TsKill` `$F3`, `SS.TmAlloc` `$F6`,
-`SS.TmKill` `$FD`. **Spare:** `$D6-$E0` (the per-sprite codes the registered table made unnecessary),
+`SS.TmKill` `$FD`. **Spare:** `$D6-$E0` (the per-sprite codes the registered table made unnecessary; the GPU manual gives `$D6` to an `SS.Gpu` call, unverified, not upstream, and possibly to be an `F$` call instead: section 7b.4),
 `$E9`, `$EB`, `$EC`, `$EF`, `$F1`, `$F2`, `$F5`, `$F7`, `$F9-$FC`, `$FE`, `$FF`. Codes are a driver's own, so the
 same number can mean something else on another device; the ones other Wildbits drivers use in this range are
 `$C7-$CB` VRN (so `SS.MsCfg` shares `$C7` with VRN, on a different path), `$D2` sc16550's `SS.DvrID`, `$E2`
@@ -715,12 +715,16 @@ Two cautions:
   protecting. Tempest masks interrupts per use, and its host test model fails any coprocessor access made
   with interrupts unmasked, so a missed mask cannot slip through.
 
-## 7b. The GPU (K2, from rc26; read from the hardware reference 2026-10-20, not yet used by any project)
+## 7b. The GPU (K2, from rc26; from the GPU Programmer's Manual, not yet used by any project)
 
-*Source: the "3D / GPU" section of the WildBits hardware reference (`nitrobotics.github.io/Wildbits`), which
-cites the rc26 RTL (`PointPipe.v`, `SceneEngine.v`, `gpu3_top.v`, `gpu3_core.v`) and bit-exact host models. Nothing
-here has run on a machine in this project yet: treat it as section 7.1 was treated, prove each unit with a
-harness before designing on it, and check the page again on every core.*
+*Source: the **GPU Programmer's Manual**, revision 1.1 (WildBits, 2026-10-27), written from the K2 "Houston" **RC28**
+RTL: `fpga-6809-cores-staging` commit `b9d1d27` (branch `nitrobotics`, "RC28"), `source/gpu3/*.v`,
+`SceneEngine*.v`, the VICKY and IRQ sources and its own grfdrv256. It replaces the hardware reference page this
+section was first read from (2026-10-20, rc26), and where the two differ the manual wins (section 13, "Which source
+to believe"); the differences are listed at the end of this section. **Nothing here has run on a machine in this
+project, and nothing in the manual has either**: its examples were assembled and checked on host models only, "no
+physical K2". Treat it as section 7.1 was treated: prove each unit with a harness before designing on it, and re-read
+the manual on every core.*
 
 **Three independent units, each with its own registers and presence signature**; a program can use any one
 without the others. **The Jr2 has none of them** (no room in its FPGA) and reads `$FF` at every GPU address, so
@@ -728,121 +732,216 @@ without the others. **The Jr2 has none of them** (no room in its FPGA) and reads
 
 | Unit | Where | Presence | Does |
 |---|---|---|---|
-| Point pipeline | fixed I/O `$FED8-$FEDF`, every task map | `STATUS` b2:0 = `%101` | transforms and projects single points for the CPU: push a point, pop its result |
-| SceneEngine | VICKY page (`VICKY_BLK`) `+$1780-$178F` | `STATUS` b2:0 = `%011` | runs a 3D display list into drawing records, to the CPU's FIFO or straight into the renderer |
-| Renderer | VICKY page `+$1800-$187F` | `GPU_ID` (`+$181F`) = `$34` | fills polygons and meshes into its own double-buffered frame, shown as a VICKY layer |
+| Point port | fixed I/O `$FED8-$FEDF`, every task map | `STATUS` b2:0 = `%101` | transforms and projects single points for the CPU: push a point, pop its result |
+| SceneEngine | VICKY page (`VICKY_BLK`) `+$1780-$178F` | `STATUS` b2:0 = `%011` | walks a byte-coded scenery list into drawing records, to the CPU or straight into the renderer |
+| Renderer | VICKY page `+$1800-$187F` | `GPU_ID` (`+$181F`) = `$34` | fills polygons and meshes, textured, shaded and depth-tested, into its own double-buffered frame, shown as a VICKY layer |
 
-**Conventions for all three:** words are written **high byte first**; the bus side runs on the 25 MHz I/O clock
-and the renderer's pixel work at 100 MHz. **Screen coordinates are sixteenths of a dot over a 640-dot frame**
-(0-10239 across; rows × 16 down), whatever the display mode.
+**One of each, global.** The renderer and the SceneEngine are single machine-wide resources, not per-process
+contexts; the point port shares the SceneEngine's arithmetic and may be used only while the SceneEngine is idle,
+done or faulted. One program owns the GPU at a time.
+
+**Conventions:** words are written **high byte first**; the bus side runs on the 25 MHz I/O clock and the
+renderer's pixel work at 100 MHz. **POLY and mesh screen coordinates are signed sixteenths of a dot over a 640-dot
+frame** (0-10239 across) in every mode; the 2D records (LINE, SPAN, RECT) take integer X 0-639, halved in 320 mode.
+Y is local to the GPU's viewport.
 
 **The renderer is a fourth layer source, not a fourth layer.** **Layer code `%011` (3)** in any `LAYER_CTRL`
 slot shows the GPU's frame on that layer, while `GPU_CTRL.EN` is set — the same code that, on tile maps, would
-have selected the undisplayable map 3. It still has to share the three layers with the tiles and bitmaps.
+have selected the undisplayable map 3. It still has to share the three layers with the tiles and bitmaps, and
+the MCR's graphics and bitmap bits (`$FFC0` b2 and b3) must both be on.
 
 ### 7b.1 The renderer (`VICKY_BLK:$1800-$187F`)
 
-A frame of up to 240 rows in the GPU's own block RAM, **640×240 at 16 colours or 320×240 at 256**, double
-buffered. Pixel 0 shows the layer beneath. Only the rows between `VIEW_ROW0` and `VIEW_ROW0 + VIEW_ROWS` are
-drawn or cleared, so a program can give the GPU a band of the screen and keep the rest for tiles or bitmaps.
+| Mode | `GPU_CTRL.MODE` / `MODE480` | Colour |
+|---|---|---|
+| 640×240 | 0 / — | 4 bits: index = group×16 + nibble, nibble 0 transparent |
+| 320×240 | 1 / 0 | 8 bits, index 0 transparent |
+| 320×480 | 1 / 1 | 8 bits; the viewport fields and the 2D records' Y gain a ninth bit |
+
+The frame lives in the GPU's own memory, double buffered, with a **16-bit depth buffer**. Pixel 0 shows the layer
+beneath. Only the rows from `VIEW_ROW0` for `VIEW_ROWS` are drawn or cleared, so a program can give the GPU a band
+of the screen and keep the rest for tiles or bitmaps. There is no CPU read port for either buffer.
 
 | Offset | Register |
 |---|---|
-| `$1800` | `GPU_CTRL`: b0 EN, b1 MODE (0 = 640×240×16, 1 = 320×240×256), b2 Z test, b3 dither, b4 RESET (write 1), b5 AUTOCLEAR at SWAP, b6 textures, b7 SEPORT (SceneEngine records go straight into the renderer) |
-| `$1801` | `STATUS`: b7 busy, b6 swap pending, b5 front buffer, b4 queue empty, b3 idle, b2 mesh error, b1 bad record, b0 overflow (writing 1 clears b2:0) |
-| `$1802/$1803` | `FIFO_FREE`: records the queue can take (512 when empty); **a read of `$1802` latches `$1803`** |
-| `$1804/$1805` | `SWAP_COUNT`, `FENCE_COUNT`: for pacing a program without an interrupt |
-| `$1806/$1807` | `VIEW_ROW0`, `VIEW_ROWS`: the rows the GPU owns |
-| `$1808/$1809` | `GPU_LUT` (b2:0 the CLUT, b6:4 the group), `CLEAR_COLOR` |
-| `$180A-$180D` | `UP_ADDR` (24-bit: target and address) and `UP_DATA` (auto-increment): meshes, textures and the shade table are uploaded here |
-| `$180E/$180F` | `SE_YMUL`: the row scale applied to SceneEngine records |
-| `$1810-$1814` | `PROBE_ROW`, `PROBE_DOT`, `PROBE_COLOR`: read back the colour of one chosen pixel |
-| `$181F` | `GPU_ID` = `$34` |
-| `$1840-$1847` | **the record window**: bytes 0-6 latch, **writing byte 7 (the opcode) pushes the record** |
+| `$1800` | `GPU_CTRL`: b0 EN, b1 MODE (0 = 640×240×4, 1 = 320 × 8-bit), b2 ZEN (depth flags allowed), b3 DITHER (shade levels, 4×4 Bayer), b4 RESET (write 1), b5 AUTOCLEAR at SWAP, b6 TEXEN, b7 SEPORT (SceneEngine records go straight into the renderer) |
+| `$1801` | `STATUS`: b7 busy, b6 swap pending, b5 front buffer, b4 queue empty (**not** "finished"), b3 idle, b2 mesh error, b1 bad record, b0 overflow (b2:0 sticky; write 1s to clear) |
+| `$1802/$1803` | `FIFO_FREE`: **units** the queue can take (512 when empty); **a read of `$1802` latches `$1803`** |
+| `$1804/$1805` | `SWAP_COUNT`, `FENCE_COUNT`: 8-bit, wrapping; for pacing a program without an interrupt |
+| `$1806/$1807` | `VIEW_ROW0`, `VIEW_ROWS` (low bytes; ninth bits at `$181C/$181D`). The origin is live; the height is queued |
+| `$1808/$1809` | `GPU_LUT` (b2:0 the CLUT — **only 0-3 are distinct**, 4-7 alias; b6:4 the 16-colour group), `CLEAR_COLOR` (for AUTOCLEAR) |
+| `$180A-$180D` | `UP_ADDR` (24-bit) and `UP_DATA` (auto-increment): meshes, textures, descriptors and the shade table are uploaded here, **one byte per queue unit** |
+| `$180E/$180F` | `SE_YMUL`: row scale applied to SceneEngine records (`$0400` = 1.0) |
+| `$1810-$1814` | `PROBE_ROW`, `PROBE_DOT`, `PROBE_COLOR`: the colour of the last write that covered one chosen pixel (sees later writes only; not a readback) |
+| `$1815-$181A` | haze: `HAZE_CTRL` b0, `HAZE_START` and `HAZE_SCALE` (16-bit), `HAZE_COLOR` |
+| `$181B` | `MODE480` b0 (only with MODE = 1) |
+| `$181F` | `GPU_ID` = `$34` (identifies the interface, not the build) |
+| `$1840-$1847` | **the record window** (aliased through `$187F`): bytes 0-6 latch, **writing byte 7 (the tag) pushes one unit** |
 
-**Commands are 8-byte records** pushed through that window into a **512-record queue** and executed strictly in
-order:
+**Upload targets** (`UP_ADDR`): texels `$000000` (256 KB), mesh entries `$400000` (64 KB), shade table `$800000`
+(16 KB), texture descriptors `$C00000` (256 × 4 bytes).
 
-| Opcode | Record |
-|---|---|
-| `$00` LINE | a line between two screen points (pixel-exact with the line engine) |
-| `$01` SPAN, `$02` RECT, `$03` CLEAR, `$04` HSPLIT | a run on one row; a filled rectangle; the view rows in one colour; a row split in two colours at a point |
-| `$08` SWAP, `$09` FENCE | show the frame at the next vertical blank and start the next one; bump `FENCE_COUNT` when everything before it is drawn |
-| `$10` POLY (+ `$11` UV) | a filled polygon of 3-8 screen vertices with depth and shade; flags for Z test and write, Gouraud, texture, decal, dither, back-face cull |
-| `$20` SETMAT, `$21` SETLIGHT, `$22` SETPROJ | the view matrix (Q15) and eye; light direction, ambient and diffuse; focal X and Y, near plane, screen centre |
-| `$28` MESH | draw an uploaded mesh (offset, face count, material): the GPU transforms, lights, clips, projects and fills it |
+**Commands are 8-byte units with the tag in byte 7**, pushed into a **512-unit queue** and executed strictly in
+order. A multi-unit record is a header unit followed by **continuation units tagged `$FE`**, which must follow it
+contiguously: no other producer's units in between, and never wait for idle in the middle of one.
 
-**Depth** is a 16-bit float of 228/z (4-bit exponent, 12-bit mantissa), so the Z test keeps 1/4096 of the
-distance at every range. **Memories:** 64 KB of mesh RAM (4,096 16-byte entries), 256 KB of 8-bit texels, a
-256-material shade table. **Speed:** one pixel pipeline, about 100 M depth-tested dots a second — 16 flat dots a
-clock at 640, half a dot a clock textured. (The record formats' byte layouts are not on the page; read them
-from the RTL or the host models before writing a record builder.)
+| Tag | Record | Units |
+|---|---|---|
+| `$00` LINE | X0, X1 (words), Y0, Y1, colour; inclusive, Bresenham, **no clipping** (a bad endpoint is BADREC) | 1 |
+| `$01` SPAN, `$02` RECT | a run on one row; a filled rectangle; right and bottom clipped | 1 |
+| `$03` CLEAR | the view rows in one colour, optionally depth too | 1 |
+| `$04` HSPLIT | the whole viewport split in two colours along a directed line (a horizon) | 2 |
+| `$08` SWAP, `$09` FENCE | show the back frame at the next vertical blank (with AUTOCLEAR, clear the new back frame); bump `FENCE_COUNT` when everything before it is drawn | 1 |
+| `$10` POLY | header: flags, material, texture ID, N; then N vertex units (X, Y in sixteenths, depth key Q, shade 0-255); then, if textured, N UV units (U, V unsigned 8.8 texels) | 1+N, or 1+2N textured |
+| `$20` SETMAT | nine Q1.15 matrix words, translation (3 × 32-bit 24.8), model scale shift | 5 |
+| `$21` SETLIGHT | light direction (Q1.15), ambient, diffuse | 2 |
+| `$22` SETPROJ | focal X, Y; centre X, Y; near plane (24.8); clip shift | 2 |
+| `$28` MESH | face offset and count, vertex base, material override: the GPU transforms, lights, near-clips, projects and fills | 1 |
+| `$FE`, `$FF` | continuation; no-op | 1 |
 
-**Pacing without an interrupt:** push a frame's records, then SWAP; `SWAP_COUNT` and `FENCE_COUNT` tell the
-program how far the GPU has got, and `FIFO_FREE` how much it can push without waiting. rc26 also names a GPU
-interrupt, but the page gives no bit for it yet.
+The byte layouts are in the manual's sections 3 and 4; **build records from those tables, and check every one
+against a host model before it reaches hardware.**
+
+**POLY** is 3-8 vertices drawn as a **fan from vertex 0**: give it a convex outline, or a concave one only if vertex
+0 sees all of it (the manual's L-shape example), else split it. Flags: `$01` ZTEST, `$02` ZWRITE (each also gated by
+`GPU_CTRL.ZEN`), `$04` GOURAUD (else flat, from vertex 0's shade), `$08` TEXTURED (sets the record length even when
+TEXEN is off), `$10` SCREENDOOR (50% coverage), `$20` DIRECT (material or texel is the final colour index, no shade
+lookup), `$40` CULL (rejects non-positive area: clockwise with Y down is front-facing). **POLY does no 3D clipping**:
+its vertices are already projected, so near-plane clipping is the caller's job. MESH does it in hardware.
+
+**Mesh memory** is 4,096 16-byte entries, faces and vertices together. A vertex is model X, Y, Z (signed words),
+a Q1.15 normal, and U, V (8.8); a face is three vertex indices (relative to MESH's vertex base), material, texture
+ID, POLY flags and a Q1.15 face normal. Faces are triangles. Per frame: SETMAT, SETLIGHT, SETPROJ (all three before
+the first MESH; don't trust power-up values), then MESH per object, then SWAP. A bad index sets MESHERR and skips
+the face. There is no instancing, skinning or normal generation, and the hardware doesn't normalise.
+
+**Depth** is a 16-bit key of inverse depth (`NEAR × 2^28 / z`, packed as a 4-bit exponent and 12-bit mantissa;
+the encoder is in the manual's section 4.3). Larger is nearer, a fragment passes when new ≥ stored, and Z = 0 is the
+farthest. There is no stencil, no alpha blending and no depth readback.
+
+**Shading** goes through two lookups: the GPU's **shade table** maps (mode bank, material 0-255, level 0-31) to a
+colour index, `level = (shade + dither) >> 3`, and VICKY's CLUT maps that index to RGB. A mesh's shade is
+`ambient + diffuse × max(0, N·L)`, from one directional light. **Textures** are 8-bit texel images, nearest
+neighbour, power-of-two sizes from 8 to 256 per axis (U and V have 8 integer bits), wrapped or clamped per axis.
+**Perspective is corrected at the ends of 16-pixel segments**, with linear interpolation between them. Without
+DIRECT a texel is a *material*, so a textured surface still takes its light level through the shade table. **Texel 0
+discards the fragment**, colour and depth both, which is the transparency for cut-outs. **Haze** replaces fragments
+beyond a depth with one colour index through a 4×4 threshold pattern: a dithered fade, not a blend.
+
+**Speed:** one pixel pipeline at 100 MHz, about 100 M depth-tested dots a second; 16 flat dots a clock at 640,
+half a dot a clock textured. Mesh transform and upload rates are not given: **measure them.**
+
+**Queue cost is in units, not records.** A textured 8-vertex POLY is 17 units, SETMAT 5, and **every uploaded byte is
+one unit**, so a large upload has to be fed in batches sized to `FIFO_FREE`. `FIFO_FREE` can read 0 while the
+SceneEngine adapter holds work.
+
+**Pacing:** push a frame's records, then SWAP. `SWAP_COUNT` and `FENCE_COUNT` tell the program how far the GPU
+has got, and `FIFO_FREE` how much it can push without waiting. **The GPU interrupt** is VICKY source 2,
+`INT_PENDING_1` bit 1 (`$FE21`, mask `$02`), and it is the OR of renderer SWAP/FENCE completion and SceneEngine
+stops: a handler must look at both. Under OS-9 that belongs to a driver; the manual's examples poll.
 
 ### 7b.2 The SceneEngine (`VICKY_BLK:$1780-$178F`)
 
-A display-list processor with its own 8 KB + 8 KB of block RAM (variables `$0000-$1FFF`, the list
-`$4000-$5FFF`). Upload a list of ops and the variables they read (the viewer's position and matrix among them),
-write GO, and it walks the list: distance and bit tests skip whole areas, calls and returns nest 16 deep,
-origins and colours are set, and every point of a line, dot or polygon is transformed, clipped and projected.
-Out come drawing records in screen coordinates. **An op the hardware doesn't handle stops it with the op's
-address; the CPU does that step and writes RESUME.**
+A display-list processor with its own memory: **8 KB of variables and workspace at `$0000-$1FFF` and 16 KB of
+scenery list at `$4000-$7FFF`**, private to it, not CPU-mapped. Upload a list and the variables it reads (the
+viewer's 32-bit eye position and Q1.15 matrix among them; the start pointer is at `$007B`), write GO, and it walks
+the list: distance and bit tests skip whole areas, calls and returns nest 16 deep, origins and colours are set, and
+every point of a line, dot or polygon is transformed, clipped and projected. Out come drawing records in screen
+coordinates. **An op the hardware doesn't handle stops it with the op's address; the CPU does that step and writes
+RESUME.** There is no instruction-count watchdog, so the CPU must abort a runaway list.
 
-| Offset | Use |
-|---|---|
-| `+0/+1` | read: pop the next output word, high byte (advances) then low |
-| `+2` | read `STATUS`: b7 output not empty, b6 busy, b5:3 state (idle, run, CPU op, done, fault), b2:0 `%011`. Write: `$01` GO, `$02` GO at ADDR, `$03` RESUME at the list pointer, `$04` ABORT |
-| `+3` | read: output words waiting (saturates at 255). Write: b0 abort and flush, b1 clear errors |
-| `+4/+5` | ADDR high/low |
-| `+6` | write a byte at ADDR, then ADDR+1; read it back (only while not busy) |
-| `+7/+8` | the list pointer: read = where the last stop was; write = where RESUME continues |
-| `+9/+A` | the last stop's op byte or fault code; errors (b0 access while busy, b1 output underflow) |
+| Offset | Read | Write |
+|---|---|---|
+| `+0/+1` | pop the next output word: high byte (pops), then the latched low | — |
+| `+2` | `STATUS`: b7 output ready, b6 busy, b5:3 state (0 idle, 1 run, 2 CPU op, 3 done, 4 fault), b2:0 `%011` | `$01` GO, `$02` GO-AT (skips GO's radio-byte copies), `$03` RESUME, `$04` ABORT |
+| `+3` | output words waiting (saturates at 255; the queue holds 1,024) | b0 abort and flush, b1 clear errors |
+| `+4/+5` | upload address | upload address |
+| `+6` | a RAM byte at the address, then +1 (only while not busy) | same |
+| `+7/+8` | where the last stop was | where RESUME continues |
+| `+9/+A` | the stop's op byte or fault code; errors (b0 access while busy, b1 output underflow) | — |
+| `+B/+C` | view byte index; view byte (then the index advances) | the 12 view bytes: screen centre, projection scales, X/Y clamps |
+| `+D/+E` | line half-width (8.8; 0 = thin) | same |
 
-Its records are vertices (screen X, Y, first flag), fill colours, 3D and screen lines, dots, a horizon split,
-variable write-backs, a CPU-op stop, a fault and the end. **The op set is Flight Simulator II's scenery
-language**, run op for op; with `GPU_CTRL.SEPORT` set the records bypass the CPU and go into the renderer.
+**The op set is Flight Simulator II's scenery language**, run op for op; the manual's section 6 is the reference
+(geometry, texture, flow, variables, origins, legacy services) and its section 8.5-8.10 the worked FSII examples.
+**The variable area is FSII's ABI, not free storage**: the walker uses it for scratch, clip state and counters.
+With `GPU_CTRL.SEPORT` set the records go into the renderer instead of the CPU, **but output must still be drained**,
+and the adapter's polygons take at most 32 vertices including clip output. Finish and drain a SceneEngine run
+before sending the renderer CPU records.
 
-### 7b.3 The point pipeline (`$FED8-$FEDF`, fixed I/O)
+### 7b.3 The point port (`$FED8-$FEDF`, fixed I/O)
 
 Load the viewer's rotation and position once, then push points; results come back in order through a 256-word
 FIFO, the first within a few I/O clocks, so a tight loop needs no polling.
 
 | Address | Use |
 |---|---|
-| `$FED8/$FED9` | write: a ground point x, z (two words). Read: pop a result word, high then low byte |
-| `$FEDA/$FEDB` | write: a 3D point x, y, z (three words) → X right, Y up, Z ahead of the viewer, flags/exponent, azimuth |
-| `$FEDC/$FEDD` | write: a camera point X, Y, Z → screen X, screen Y, view units |
-| `$FEDE` | write a command: `$01` matrix (9 words, Q15: 32767 = 1.0), `$02` eye (3 words), `$03` ground base sums (5 words), `$1x` mode (b0 delta points), `$2x` mark fence n, `$30` query. Read `STATUS`: b7 result ready, b6 busy, b5 input nearly full, b4 error, b2:0 `%101` |
+| `$FED8/$FED9` | G port. Write: a ground point x, z → camera X, Y, Z, flags (4 words). Read: pop a result word, high byte then the latched low (all ports read the same queue) |
+| `$FEDA/$FEDB` | P port. Write: a 3D point x, y, z → camera X, Y, Z, flags, azimuth (5 words) |
+| `$FEDC/$FEDD` | Q port. Write: a camera point X, Y, Z → screen X, screen Y (sixteenths), depth key (3 words) |
+| `$FEDE` | write a command (operands through the G port): `$01` matrix (9 words, Q1.15), `$02` eye (3 words), `$03` ground base (5 words), `$10` absolute points (eye subtracted) / `$11` delta points, `$2n` marker (returns `$A500`+n after earlier work), `$30` query (returns `$5050`, `$0100`, errors, points done). Read `STATUS`: b7 ready, b6 busy, b5 input nearly full (>240), b4 error, b2:0 `%101` |
 | `$FEDF` | write: b0 reset the FIFOs and errors, b1 clear errors. Read: result words waiting (0-255) |
 
-Result flags: b7 behind the viewer, b6/b5 off the right/left edge, b4/b3 off the top/bottom, b1 halved for
-range, b0 overflow. The projection's screen centre (dot 320, row 73.5) and row scale (a 147-row window) are
-fixed in rc26; for another window, project from the 3D port's X, Y, Z yourself, or use the renderer's SETPROJ.
+Result flags (the low byte of the flags word; the high byte is an exponent): b7 behind the viewer (Z negative),
+b6/b5 X < −Z / X > Z, b4/b3 Y < −Z / Y > Z, b1 halved to fit, b0 overflow. **An empty read returns `$8000`** and
+sets the underflow error: never take it for a coordinate. **The Q port projects with the SceneEngine's view bytes**
+(`+$178B/$178C`), not the renderer's SETPROJ, so its centre and scale are settable (rc26's fixed centre is gone).
+Projection clamps points to the view; it does not clip lines or polygons, so CPU code using it must clip. It has
+no interrupt; poll or use markers.
 
 ### 7b.4 Using it from NitrOS-9
 
-- **The point pipeline is fixed I/O,** like the DMA and the coprocessor (section 7a): an absolute-address
+- **The point port is fixed I/O,** like the DMA and the coprocessor (section 7a): an absolute-address
   exception, global and unarbitrated, so the same cautions apply — mask interrupts around a sequence if
   anything else might use it, and make the host model fail an unmasked access.
-- **The renderer and the SceneEngine are in the VICKY page,** which grfdrv256 owns. **grfdrv256 has no GPU calls
-  yet** (section 6's table). A program would either map `VICKY_BLK` itself (by symbol, never by number; and it
-  then owns the terminal-switch question: grfdrv256 knows nothing of the GPU, so it can't restore the GPU's
-  state on a switch, and the program's register writes should follow the `V.TermLive` rule) or, better, get calls added: push a batch of records, set the GPU's
-  control and view rows, upload into mesh or texture memory. The spare codes are listed in section 6.
-- **The GPU layer survives nothing by itself.** Its frame lives in the GPU's block RAM, not in blocks a program
-  owns, so the switch-it-off rule (section 6) becomes: clear `GPU_CTRL.EN` and take code 3 out of `LAYER_CTRL` on
-  every exit path.
-- **Which unit for what** (the reference's own advice): a model to show (a cube, a car, an aircraft) — upload
+- **The renderer and the SceneEngine are in the VICKY page,** which grfdrv256 owns. **The manual documents a
+  grfdrv256 call for them, `SS.Gpu` (`$D6`)**, and its examples use nothing else. **Unverified: the manual is the only
+  source, and the route itself is in question** (2026-11-03): GPU access may come instead as a new `F$` system
+  call, not a grfdrv256 status call at all. Upstream NitrOS-9 main has neither (checked at `226d0cc5`), and no tree
+  on this machine does, so there is nothing to check the manual against. Don't write code against any of it until
+  the real interface is confirmed and its source is in hand; then document it here (and in section 6's table if it
+  is a grfdrv256 call). The functions are likely to survive whichever route it takes, since they are what the
+  hardware needs. As the manual gives them: A = path, X high byte = the function, X low byte = a block, flags or command; protect U, which most
+  functions use. Set and Get are `I$SetStt` / `I$GetStt`.
+
+  | Fn | Name | Does |
+  |---|---|---|
+  | 0, 1 | `LPk8`, `LPk16` | read or write one byte or word in a physical block (XL) at offset Y |
+  | 2 | `LPkN` | write U bytes (1-`$1FFC`) at offset + (i AND mask): **mask 0 sends every byte to one register, which is how `UP_DATA` uploads go**. Not queue-checked: batch it within `FIFO_FREE` |
+  | 3, 5 | `Scene`, `SceneL` | upload SceneEngine memory from a buffer, or from a list of ranges |
+  | 4 | `Rec` | push 1-1,024 8-byte units; the driver checks queue room per unit. XL b0 = convert old 240-row LINE records for 480 rows, b1 = wait for the SceneEngine to be idle first |
+  | 6 | `SeOut` | drain the SceneEngine's output into a buffer, optionally with GO, GO-AT or RESUME first; repeat while busy |
+  | 7 | `FixN` | write 1-32 bytes to the fixed VICKY registers (`$FFC0-$FFDF`) or 1-8 to the point port |
+  | 8 | `Pp` | run a list of point-port transactions; the results replace the input |
+  | 9 | `List` | up to 255 seven-byte items of set, get or wait (for a raster line, or for queue room); no nesting |
+
+  Without it, a program would map `VICKY_BLK` itself (by symbol, never by number) and own the terminal-switch
+  question; its register writes should follow the `V.TermLive` rule.
+- **Nothing saves the GPU's state on a terminal switch,** with or without `SS.Gpu`: the manual's examples assume
+  a fresh, live terminal and no other GPU owner, and check `GPU_ID`, enable and busy before taking it.
+- **Turning the GPU layer on:** `SS.Layer` (`$8E`) with X = the layer and Y = 3, and `SS.MCR` (`$8C`) with the
+  graphics and bitmap bits on (Get it first and restore both bytes). There is no Get for `SS.Layer`, so restore
+  the layer to its normal source on exit.
+- **The GPU layer survives nothing by itself.** Its frame lives in the GPU's own memory, not in blocks a program
+  owns, so the switch-it-off rule (section 6) becomes: abort and flush any SceneEngine work, reset and disable the
+  GPU (`GPU_CTRL.EN` clear), take code 3 out of `LAYER_CTRL` and restore the MCR, on every exit path.
+- **The graphics CLUTs are shared.** Save and restore the entries you change; when mapping `FONT_BLK` yourself,
+  avoid logical slot 7, where `$1D00-$1FFF` falls under the fixed I/O and hides part of CLUT 3.
+- **Which unit for what** (the manual's own advice): a model to show (a cube, a car, an aircraft) — upload
   it as a mesh, then per frame SETMAT, SETLIGHT, MESH, SWAP, the renderer alone. Numbers back from 3D (where a
-  point lands, picking, radar, sprites placed in a 3D world) — the point pipeline, with the line engine or GPU
+  point lands, picking, radar, sprites placed in a 3D world) — the point port, with the line engine or GPU
   records to draw. A large world described once and culled by distance in hardware — the SceneEngine, into the
   renderer through SEPORT or to the CPU. And **for 2D games the renderer is a fast double-buffered drawing
   layer**: RECT, SPAN, LINE and CLEAR records into a 320×240×256 frame, swapped at the vblank, would retire the
   "erase the bitmap every frame" problem of section 14's survey for anything that can be drawn as spans and
   rectangles — on the K2.
+
+**Where the rc26 reference page (this section's first source) was wrong or out of date:** UV coordinates are
+continuation units after the vertices, not a `$11` record; POLY has no decal or dither flag (dither is
+`GPU_CTRL` b3) and gains SCREENDOOR and DIRECT; the queue counts units, not records; the SceneEngine's list RAM is
+16 KB at `$4000-$7FFF`, not 8 KB; the point port's projection is set through the SceneEngine's view bytes instead
+of being fixed at dot 320, row 73.5; the interrupt now has its bit. New since that page: the 320×480 mode, haze,
+the probe, line width, and the record byte layouts.
 
 ## 8. Sound
 
@@ -1844,7 +1943,7 @@ above (as of 2026-10-21). Anything on this list needs a harness and a hardware r
 | What | Where it's described | What's unknown |
 |---|---|---|
 | **Timings on the current core** | throughout (the note at the top) | most cost figures are from 8 MHz; the ~20 MHz machines need the key ones re-measured: a driver call, `SS.SprPush` per record, `F$MapBlk`, `SS.TmScrl` |
-| The GPU's three units (K2, rc26) | 7b | everything: read from the reference page, never run; the record byte layouts aren't documented there |
+| The GPU's three units (K2, rc26; documented to RC28) | 7b | everything: read from the GPU Programmer's Manual, never run here or by the manual's authors; mesh transform and upload rates; how a program reaches it under OS-9: the manual's `SS.Gpu` (`$D6`) or a new `F$` call; upstream has neither, and confirmation is pending |
 | The OPL3 | 8 | write-only with no status; its write timing and a register shadow |
 | The PSGs as a sound source | 8 | unexercised beyond grfdrv256's own use |
 | PCM (rc25) | 8 | the CPU is the sample clock: what a frame loop can sustain |
